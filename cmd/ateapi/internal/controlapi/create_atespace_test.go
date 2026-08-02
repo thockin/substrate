@@ -46,6 +46,10 @@ func TestValidateCreateAtespaceRequest(t *testing.T) {
 		&ateapipb.CreateAtespaceRequest{},
 		field.ErrorList{field.Required(field.NewPath("atespace"), "")},
 	}, {
+		"missing atespace.metadata",
+		valid(func(a *ateapipb.Atespace) { a.Metadata = nil }),
+		field.ErrorList{field.Required(field.NewPath("atespace", "metadata"), "")},
+	}, {
 		"metadata.atespace must be empty",
 		valid(func(a *ateapipb.Atespace) { a.Metadata.Atespace = "ns1" }),
 		field.ErrorList{field.Invalid(field.NewPath("atespace", "metadata", "atespace"), "ns1", "")},

@@ -60,12 +60,17 @@ func validateCreateAtespaceRequest(ctx context.Context, req *ateapipb.CreateAtes
 		return errs
 	}
 
-	// Atespace is global-scoped: metadata.atespace must be empty, name required + valid.
+	meta := atespace.GetMetadata()
 	metaPath := atespacePath.Child("metadata")
-	if val, p := atespace.GetMetadata().GetAtespace(), metaPath.Child("atespace"); val != "" {
+	if meta == nil {
+		// handled by DV
+		return errs
+	}
+
+	if val, p := meta.GetAtespace(), metaPath.Child("atespace"); val != "" {
 		errs = append(errs, field.Invalid(p, val, "must be empty for a global-scoped resource"))
 	}
-	if val, p := atespace.GetMetadata().GetName(), metaPath.Child("name"); val == "" {
+	if val, p := meta.GetName(), metaPath.Child("name"); val == "" {
 		errs = append(errs, field.Required(p, ""))
 	} else {
 		errs = append(errs, resources.ValidateResourceName(val, p)...)

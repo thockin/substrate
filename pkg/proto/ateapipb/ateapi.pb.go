@@ -1044,6 +1044,8 @@ func (x *ActorSnapshotTag) GetScope() ActorSnapshotTagScope {
 type Atespace struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Common resource metadata: name, uid, version, timestamps.
+	//
+	// +k8s:required
 	Metadata      *ResourceMetadata `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

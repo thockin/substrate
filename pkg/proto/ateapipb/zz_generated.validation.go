@@ -29,6 +29,44 @@ import (
 	field "k8s.io/apimachinery/pkg/util/validation/field"
 )
 
+// Validate_Atespace validates an instance of Atespace according
+// to declarative validation rules in the API schema.
+func Validate_Atespace(
+	ctx context.Context, op operation.Operation, fldPath *field.Path,
+	obj, oldObj *Atespace) (errs field.ErrorList) {
+
+	{ // field Atespace.Metadata
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *ResourceMetadata,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if equality.Semantic.DeepEqual(obj, oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *Atespace) *ResourceMetadata {
+				return oldObj.Metadata
+			})
+		errs = append(errs, fn(fldPath.Child("metadata"), obj.Metadata, oldVal, oldObj != nil)...)
+	}
+
+	return errs
+}
+
 // Validate_CreateAtespaceRequest validates an instance of CreateAtespaceRequest according
 // to declarative validation rules in the API schema.
 func Validate_CreateAtespaceRequest(
@@ -55,6 +93,8 @@ func Validate_CreateAtespaceRequest(
 			if earlyReturn {
 				return // do not proceed
 			}
+			// call the type's validation function
+			errs = append(errs, Validate_Atespace(ctx, op, fldPath, obj, oldObj)...)
 			return
 		}
 		oldVal := safe.Field(oldObj,
