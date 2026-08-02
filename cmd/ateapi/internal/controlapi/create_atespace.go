@@ -23,11 +23,10 @@ import (
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
 func (s *Service) CreateAtespace(ctx context.Context, req *ateapipb.CreateAtespaceRequest) (*ateapipb.Atespace, error) {
-	if errs := validateCreateAtespaceRequest(ctx, req); len(errs) > 0 {
+	if errs := req.Validate(ctx); len(errs) > 0 {
 		return nil, toGRPCStatusError(errs)
 	}
 
@@ -46,31 +45,4 @@ func (s *Service) CreateAtespace(ctx context.Context, req *ateapipb.CreateAtespa
 	}
 
 	return stored, nil
-}
-
-func validateCreateAtespaceRequest(ctx context.Context, req *ateapipb.CreateAtespaceRequest) field.ErrorList {
-	errs := req.Validate(ctx) // TODO: move to caller when all manual validation is removed.
-
-	atespace := req.GetAtespace()
-	if atespace == nil {
-		// handled by DV
-		return errs
-	}
-
-	meta := atespace.GetMetadata()
-	if meta == nil {
-		// handled by DV
-		return errs
-	}
-
-	if val := meta.GetAtespace(); val != "" {
-		// handled by DV
-	}
-	if val := meta.GetName(); val == "" {
-		// handled by DV
-	} else {
-		// handled by DV
-	}
-
-	return errs
 }
