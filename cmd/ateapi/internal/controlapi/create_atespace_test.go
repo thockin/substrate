@@ -22,13 +22,23 @@ import (
 )
 
 func TestValidateCreateAtespaceRequest(t *testing.T) {
+	valid := func(mutate func(*ateapipb.Atespace)) *ateapipb.CreateAtespaceRequest {
+		a := &ateapipb.Atespace{
+			Metadata: &ateapipb.ResourceMetadata{Atespace: "", Name: "as1"},
+		}
+		if mutate != nil {
+			mutate(a)
+		}
+		return &ateapipb.CreateAtespaceRequest{Atespace: a}
+	}
+
 	tests := []struct {
 		name string
 		req  *ateapipb.CreateAtespaceRequest
 		want field.ErrorList
 	}{{
 		"valid",
-		&ateapipb.CreateAtespaceRequest{Atespace: &ateapipb.Atespace{Metadata: &ateapipb.ResourceMetadata{Name: "team-a"}}},
+		valid(nil),
 		nil,
 	}, {
 		"missing atespace",
@@ -36,15 +46,15 @@ func TestValidateCreateAtespaceRequest(t *testing.T) {
 		field.ErrorList{field.Required(field.NewPath("atespace"), "")},
 	}, {
 		"metadata.atespace must be empty",
-		&ateapipb.CreateAtespaceRequest{Atespace: &ateapipb.Atespace{Metadata: &ateapipb.ResourceMetadata{Atespace: "ns1", Name: "team-a"}}},
+		valid(func(a *ateapipb.Atespace) { a.Metadata.Atespace = "ns1" }),
 		field.ErrorList{field.Invalid(field.NewPath("atespace", "metadata", "atespace"), "ns1", "")},
 	}, {
 		"missing metadata.name",
-		&ateapipb.CreateAtespaceRequest{Atespace: &ateapipb.Atespace{Metadata: &ateapipb.ResourceMetadata{Name: ""}}},
+		valid(func(a *ateapipb.Atespace) { a.Metadata.Name = "" }),
 		field.ErrorList{field.Required(field.NewPath("atespace", "metadata", "name"), "")},
 	}, {
 		"invalid metadata.name",
-		&ateapipb.CreateAtespaceRequest{Atespace: &ateapipb.Atespace{Metadata: &ateapipb.ResourceMetadata{Name: "Team_A"}}},
+		valid(func(a *ateapipb.Atespace) { a.Metadata.Name = "Team_A" }),
 		field.ErrorList{field.Invalid(field.NewPath("atespace", "metadata", "name"), "Team_A", "")},
 	}}
 	for _, tt := range tests {
