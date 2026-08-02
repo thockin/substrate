@@ -1550,6 +1550,7 @@ func (x *GetActorRequest) GetActor() *ObjectRef {
 type CreateActorRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The actor to create.
+	// +k8s:required
 	Actor *Actor `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
 	// Optional durable snapshot used to initialize the Actor.
 	SourceSnapshot *ActorSnapshotRef `protobuf:"bytes,2,opt,name=source_snapshot,json=sourceSnapshot,proto3" json:"source_snapshot,omitempty"`
