@@ -278,6 +278,8 @@ message ActorSnapshotRef {
 
 message CreateAtespaceRequest {
   // The atespace to create.
+  //
+  // +k8s:required
   Atespace atespace = 1;
 }
 

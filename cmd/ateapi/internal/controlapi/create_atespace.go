@@ -28,7 +28,7 @@ import (
 )
 
 func (s *Service) CreateAtespace(ctx context.Context, req *ateapipb.CreateAtespaceRequest) (*ateapipb.Atespace, error) {
-	if errs := validateCreateAtespaceRequest(req); len(errs) > 0 {
+	if errs := validateCreateAtespaceRequest(ctx, req); len(errs) > 0 {
 		return nil, toGRPCStatusError(errs)
 	}
 
@@ -49,14 +49,14 @@ func (s *Service) CreateAtespace(ctx context.Context, req *ateapipb.CreateAtespa
 	return stored, nil
 }
 
-func validateCreateAtespaceRequest(req *ateapipb.CreateAtespaceRequest) field.ErrorList {
+func validateCreateAtespaceRequest(ctx context.Context, req *ateapipb.CreateAtespaceRequest) field.ErrorList {
 	var fldPath *field.Path
-	var errs field.ErrorList
+	errs := req.Validate(ctx) // TODO: move to caller when all manual validation is removed.
 
 	atespace := req.GetAtespace()
 	atespacePath := fldPath.Child("atespace")
 	if atespace == nil {
-		errs = append(errs, field.Required(atespacePath, ""))
+		// handled by DV
 		return errs
 	}
 
