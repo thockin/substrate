@@ -15,6 +15,7 @@
 package controlapi
 
 import (
+	"context"
 	"testing"
 
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
@@ -59,7 +60,7 @@ func TestValidateCreateAtespaceRequest(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assertValidateErr(t, validateCreateAtespaceRequest(tt.req), tt.want)
+			assertValidateErr(t, validateCreateAtespaceRequest(context.Background(), tt.req), tt.want)
 		})
 	}
 }

@@ -2627,6 +2627,8 @@ func (x *AssetFile) GetSha256() string {
 type CreateAtespaceRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The atespace to create.
+	//
+	// +k8s:required
 	Atespace      *Atespace `protobuf:"bytes,1,opt,name=atespace,proto3" json:"atespace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
