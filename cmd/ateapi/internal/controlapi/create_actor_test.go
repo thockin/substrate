@@ -92,13 +92,17 @@ func TestValidateCreateActorRequest(t *testing.T) {
 		&ateapipb.CreateActorRequest{},
 		field.ErrorList{field.Required(field.NewPath("actor"), "")},
 	}, {
+		"missing actor.metadata",
+		validActor(func(a *ateapipb.Actor) { a.Metadata = nil }),
+		field.ErrorList{field.Required(field.NewPath("actor", "metadata"), "")},
+	}, {
 		"missing actor.metadata.atespace",
 		validActor(func(a *ateapipb.Actor) { a.Metadata.Atespace = "" }),
 		field.ErrorList{field.Required(field.NewPath("actor", "metadata", "atespace"), "")},
 	}, {
 		"invalid actor.metadata.atespace",
 		validActor(func(a *ateapipb.Actor) { a.Metadata.Atespace = "NS1" }),
-		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "atespace"), "NS1", "")},
+		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "atespace"), nil, "").WithOrigin("format=k8s-short-name")},
 	}, {
 		"missing actor.metadata.name",
 		validActor(func(a *ateapipb.Actor) { a.Metadata.Name = "" }),
@@ -106,7 +110,7 @@ func TestValidateCreateActorRequest(t *testing.T) {
 	}, {
 		"invalid actor.metadata.name",
 		validActor(func(a *ateapipb.Actor) { a.Metadata.Name = "ID1" }),
-		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "name"), "ID1", "")},
+		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "name"), nil, "").WithOrigin("format=k8s-short-name")},
 	}, {
 		"missing actor_template_namespace",
 		validActor(func(a *ateapipb.Actor) { a.ActorTemplateNamespace = "" }),
@@ -114,7 +118,7 @@ func TestValidateCreateActorRequest(t *testing.T) {
 	}, {
 		"invalid actor_template_namespace",
 		validActor(func(a *ateapipb.Actor) { a.ActorTemplateNamespace = "invalid value" }),
-		field.ErrorList{field.Invalid(field.NewPath("actor", "actor_template_namespace"), "invalid value", "")},
+		field.ErrorList{field.Invalid(field.NewPath("actor", "actor_template_namespace"), nil, "")},
 	}, {
 		"missing actor_template_name",
 		validActor(func(a *ateapipb.Actor) { a.ActorTemplateName = "" }),
@@ -122,7 +126,7 @@ func TestValidateCreateActorRequest(t *testing.T) {
 	}, {
 		"invalid actor_template_name",
 		validActor(func(a *ateapipb.Actor) { a.ActorTemplateName = "invalid value" }),
-		field.ErrorList{field.Invalid(field.NewPath("actor", "actor_template_name"), "invalid value", "")},
+		field.ErrorList{field.Invalid(field.NewPath("actor", "actor_template_name"), nil, "")},
 	}, {
 		"worker_selector with nil match_labels",
 		validActor(func(a *ateapipb.Actor) { a.WorkerSelector = &ateapipb.Selector{} }),

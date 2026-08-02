@@ -832,7 +832,9 @@ func (x *ExternalVolume) GetVolumeContext() map[string]string {
 type Actor struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Common resource metadata: atespace, name, uid, version, timestamps.
-	// +k8s:opaqueType
+	//
+	// +k8s:required
+	// +k8s:subfield(atespace)=+k8s:required
 	Metadata *ResourceMetadata `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	// TODO: delete both fields once we start using actor_template_version below.
 	ActorTemplateNamespace string       `protobuf:"bytes,2,opt,name=actor_template_namespace,json=actorTemplateNamespace,proto3" json:"actor_template_namespace,omitempty"`
@@ -3534,6 +3536,7 @@ func (x *GetActorRequest) GetActor() *ObjectRef {
 type CreateActorRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The actor to create.
+	//
 	// +k8s:required
 	Actor *Actor `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
 	// Optional durable snapshot used to initialize the Actor.
@@ -3596,6 +3599,8 @@ type UpdateActorRequest struct {
 	// update.
 	// actor.metadata.version and actor.metadata.uid are optional preconditions and
 	// zero values skip the check.
+	//
+	// +k8s:opaqueType
 	Actor *Actor `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
 	// The set of fields to update. Required.
 	//
