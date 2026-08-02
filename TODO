@@ -1,0 +1,16 @@
+Who validates version monotonic and nounset
+Who validates uuid nounset
+forbidden=reason
+pass "this is alpha" to validation-gen
+Uid -> UID
+create_time -> createTime
+Labels
+rename receivers in cmd/ateapi/internal/store/ateredis/ateredis.go
+format=k8s-ip
+move Actor.Status type -> ActorStatus
+Do we need the clone in redis UpdateActor() if it is clone before?
+UpdateActor should return Actor
+ActorTagSnapshot is not resource-oriented (verb methods TagSnapshot)
+avoid GetFoo() proto methods
+ - or investigatge `optional` scalars
+ - or investigate opaque
