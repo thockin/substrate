@@ -1,0 +1,660 @@
+commit 03fff0117d881ca44b55175645b504d763101700
+Good "git" signature for thockin@google.com with ED25519 key SHA256:PfQ0rwNUgsu5aRmerT0vkihWn/S3MXY3uoCPUiMdPrg
+Author: Tim Hockin <thockin@google.com>
+Date:   Fri Jul 3 15:14:43 2026 -0700
+
+    POC: use k8s validation-gen
+
+diff --git cmd/ateapi/internal/controlapi/create_actor.go cmd/ateapi/internal/controlapi/create_actor.go
+index 8ccf885c..4f230dd4 100644
+--- cmd/ateapi/internal/controlapi/create_actor.go
++++ cmd/ateapi/internal/controlapi/create_actor.go
+@@ -13,31 +13,30 @@
+ // limitations under the License.
+ 
+ package controlapi
+ 
+ import (
+ 	"context"
+ 	"errors"
+ 	"fmt"
+ 
+ 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
+-	"github.com/agent-substrate/substrate/internal/resources"
+ 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
+ 	"google.golang.org/grpc/codes"
+ 	"google.golang.org/grpc/status"
+ 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+ 	"k8s.io/apimachinery/pkg/api/validate/content"
+ 	"k8s.io/apimachinery/pkg/util/validation/field"
+ )
+ 
+ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequest) (*ateapipb.CreateActorResponse, error) {
+-	if err := validateCreateActorRequest(req); err != nil {
++	if err := req.Validate(ctx); err != nil {
+ 		return nil, err
+ 	}
+ 	_, err := s.actorTemplateLister.ActorTemplates(req.GetActorTemplateNamespace()).Get(req.GetActorTemplateName())
+ 	if err != nil {
+ 		if k8serrors.IsNotFound(err) {
+ 			return nil, status.Errorf(codes.FailedPrecondition, "ActorTemplate %s/%s not found", req.GetActorTemplateNamespace(), req.GetActorTemplateName())
+ 		}
+ 		return nil, fmt.Errorf("while getting ActorTemplate: %w", err)
+ 	}
+ 
+@@ -71,56 +70,20 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
+ 	storedActor, err := s.persistence.GetActor(ctx, req.GetActorRef().GetAtespace(), id)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("while fetching recorded actor from DB: %w", err)
+ 	}
+ 
+ 	return &ateapipb.CreateActorResponse{
+ 		Actor: storedActor,
+ 	}, nil
+ }
+ 
+-func validateCreateActorRequest(req *ateapipb.CreateActorRequest) error {
+-	var fldPath *field.Path
+-	var errs field.ErrorList
+-
+-	if val, fldPath := req.ActorTemplateNamespace, fldPath.Child("actor_template_namespace"); val == "" {
+-		errs = append(errs, field.Required(fldPath, ""))
+-	} else {
+-		for _, msg := range content.IsDNS1123Label(val) {
+-			errs = append(errs, field.Invalid(fldPath, val, msg))
+-		}
+-	}
+-
+-	if val, fldPath := req.ActorTemplateName, fldPath.Child("actor_template_name"); val == "" {
+-		errs = append(errs, field.Required(fldPath, ""))
+-	} else {
+-		for _, msg := range content.IsDNS1123Subdomain(val) {
+-			errs = append(errs, field.Invalid(fldPath, val, msg))
+-		}
+-	}
+-
+-	if val, fldPath := req.ActorRef, fldPath.Child("actor_ref"); val == nil {
+-		errs = append(errs, field.Required(fldPath, ""))
+-	} else {
+-		errs = append(errs, resources.ValidateActorRef(val, fldPath)...)
+-	}
+-
+-	if val := req.WorkerSelector; val != nil {
+-		errs = append(errs, validateSelector(val, fldPath.Child("worker_selector"))...)
+-	}
+-
+-	if len(errs) > 0 {
+-		return status.Error(codes.InvalidArgument, errs.ToAggregate().Error())
+-	}
+-	return nil
+-}
+-
+ func validateSelector(sel *ateapipb.Selector, fldPath *field.Path) field.ErrorList {
+ 	var errs field.ErrorList
+ 
+ 	if sel.MatchLabels != nil {
+ 		const maxSelectorMatchLabels = 10
+ 		if n := len(sel.MatchLabels); n > maxSelectorMatchLabels {
+ 			return field.ErrorList{field.TooMany(fldPath.Child("match_labels"), n, maxSelectorMatchLabels)}
+ 		}
+ 
+ 		for k, v := range sel.MatchLabels {
+diff --git cmd/ateapi/internal/controlapi/functional_test.go cmd/ateapi/internal/controlapi/functional_test.go
+index 82108421..3d9a7588 100644
+--- cmd/ateapi/internal/controlapi/functional_test.go
++++ cmd/ateapi/internal/controlapi/functional_test.go
+@@ -1884,20 +1884,21 @@ func TestUpdateActor_ReassignsPoolAcrossSuspendResume(t *testing.T) {
+ // TestValidation tests the negative validation cases for all gRPC methods.
+ // Workflow:
+ // 1. Uses table-driven tests for each RPC method (CreateActor, GetActor, ResumeActor, SuspendActor).
+ // 2. Passes invalid requests (missing required fields).
+ // 3. Verifies that all requests fail with an error.
+ func TestValidation(t *testing.T) {
+ 	ns := namespaceForTest("ns-validation")
+ 	tc := setupTest(t, ns)
+ 	defer tc.cleanup()
+ 
++	// FIXME: this should move next to the proto files and the validate method
+ 	t.Run("CreateActor", func(t *testing.T) {
+ 		tests := []struct {
+ 			name    string
+ 			req     *ateapipb.CreateActorRequest
+ 			wantMsg string
+ 		}{{
+ 			"missing actor_template_namespace",
+ 			&ateapipb.CreateActorRequest{ActorRef: &ateapipb.ActorRef{Atespace: "ns1", Name: "id1"}, ActorTemplateName: "tmpl1"},
+ 			"actor_template_namespace: Required value",
+ 		}, {
+@@ -1957,21 +1958,21 @@ func TestValidation(t *testing.T) {
+ 			},
+ 			"actor_ref.name: Invalid value",
+ 		}, {
+ 			"invalid worker_selector label key",
+ 			&ateapipb.CreateActorRequest{
+ 				ActorRef:               &ateapipb.ActorRef{Atespace: "ns1", Name: "id1"},
+ 				ActorTemplateNamespace: "ns1",
+ 				ActorTemplateName:      "tmpl1",
+ 				WorkerSelector:         &ateapipb.Selector{MatchLabels: map[string]string{"bad key!": "x"}},
+ 			},
+-			`worker_selector.match_labels\[bad key!\]: Invalid value`,
++			`worker_selector.match_labels: Invalid value: \"bad key!\"`,
+ 		}, {
+ 			"invalid worker_selector label value",
+ 			&ateapipb.CreateActorRequest{
+ 				ActorRef:               &ateapipb.ActorRef{Atespace: "ns1", Name: "id1"},
+ 				ActorTemplateNamespace: "ns1",
+ 				ActorTemplateName:      "tmpl1",
+ 				WorkerSelector:         &ateapipb.Selector{MatchLabels: map[string]string{"tier": "not valid!"}},
+ 			},
+ 			`worker_selector.match_labels\[tier\]: Invalid value`,
+ 		}, {
+diff --git internal/ateinterceptors/ateinterceptors.go internal/ateinterceptors/ateinterceptors.go
+index 93c196b6..08a40b1d 100644
+--- internal/ateinterceptors/ateinterceptors.go
++++ internal/ateinterceptors/ateinterceptors.go
+@@ -19,20 +19,21 @@ import (
+ 	"errors"
+ 	"log/slog"
+ 	"strconv"
+ 	"time"
+ 
+ 	"google.golang.org/grpc"
+ 	"google.golang.org/grpc/codes"
+ 	"google.golang.org/grpc/metadata"
+ 	"google.golang.org/grpc/status"
+ 	"google.golang.org/protobuf/proto"
++	"google.golang.org/protobuf/protoadapt"
+ 	"google.golang.org/protobuf/reflect/protoreflect"
+ )
+ 
+ // ServerElapsedTrailer carries the server's handler duration in microseconds,
+ // so clients can report a latency unaffected by their own scheduling overhead.
+ const ServerElapsedTrailer = "x-server-elapsed-us"
+ 
+ func ServerUnaryInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+ 	startTime := time.Now()
+ 
+@@ -54,21 +55,37 @@ func ServerUnaryInterceptor(ctx context.Context, req any, info *grpc.UnaryServer
+ 		slog.String("elapsed-time", elapsed.String()),
+ 	)
+ 
+ 	if err != nil {
+ 		var statusErr interface {
+ 			GRPCStatus() *status.Status
+ 		}
+ 
+ 		if errors.As(err, &statusErr) {
+ 			st := statusErr.GRPCStatus()
+-			return nil, status.Error(st.Code(), st.Message())
++			//FIXME: investigate why we are doing this error deconstruction
++			result := status.New(st.Code(), st.Message())
++
++			origDetails := st.Details()
++			v1Details := make([]protoadapt.MessageV1, 0, len(origDetails))
++			for _, d := range origDetails {
++				if msg, ok := d.(protoadapt.MessageV2); ok {
++					v1Details = append(v1Details, protoadapt.MessageV1Of(msg))
++				} else {
++					return nil, status.Errorf(codes.Internal, "internal error saving error details: not a protoadapt.MessageV2")
++				}
++			}
++			result, err := result.WithDetails(v1Details...)
++			if err != nil {
++				return nil, status.Errorf(codes.Internal, "internal error saving error details: %v", err)
++			}
++			return nil, result.Err()
+ 		}
+ 
+ 		// No status error found in chain.
+ 		return nil, status.Errorf(codes.Internal, "internal server error: %v", err)
+ 	}
+ 
+ 	return resp, err
+ }
+ 
+ func sanitizeForLog(v any) any {
+diff --git pkg/proto/ateapipb/ateapi.proto pkg/proto/ateapipb/ateapi.proto
+index 249d13c7..b81f0026 100644
+--- pkg/proto/ateapipb/ateapi.proto
++++ pkg/proto/ateapipb/ateapi.proto
+@@ -13,21 +13,20 @@
+ // limitations under the License.
+ 
+ // TODO: Here and everywhere, s/Session/Actor to align with the glossary.
+ 
+ syntax = "proto3";
+ 
+ package ateapi;
+ 
+ option go_package = "github.com/agent-substrate/substrate/pkg/proto/ateapipb";
+ 
+-
+ // Control is the primary RPC interface for Agentic Substrate.
+ service Control {
+   // Get an Actor.
+   rpc GetActor(GetActorRequest) returns (GetActorResponse) {}
+ 
+   // Create a new Actor deriving from a given ActorTemplate.
+   rpc CreateActor(CreateActorRequest) returns (CreateActorResponse) {}
+ 
+   // Update mutable fields on an existing Actor.
+   rpc UpdateActor(UpdateActorRequest) returns (UpdateActorResponse) {}
+@@ -52,113 +51,132 @@ service Control {
+ 
+   // Create a new Atespace. Substrate-native, stored in Redis.
+   rpc CreateAtespace(CreateAtespaceRequest) returns (CreateAtespaceResponse) {}
+ 
+   // Get an Atespace by name.
+   rpc GetAtespace(GetAtespaceRequest) returns (GetAtespaceResponse) {}
+ 
+   // List all Atespaces.
+   rpc ListAtespaces(ListAtespacesRequest) returns (ListAtespacesResponse) {}
+ 
+-  // Delete an empty Atespace. Rejects (FailedPrecondition) if any actors remain.
++  // Delete an empty Atespace. Rejects (FailedPrecondition) if any actors
++  // remain.
+   rpc DeleteAtespace(DeleteAtespaceRequest) returns (DeleteAtespaceResponse) {}
+ 
+   // Debugging: drop all data from the ate database.
+   rpc DebugClear(DebugClearRequest) returns (DebugClearResponse) {}
+ }
+ 
++// FIXME: comments
++message ValidationError {
++  string Type = 1;
++  string Field = 2;
++  string Detail = 3;
++  string Origin = 4; // FIXME: passing this back up to users is ugly, but we
++                     // test validathion thru the real API for now
++}
++
+ enum SnapshotType {
+   SNAPSHOT_TYPE_UNSPECIFIED = 0;
+-  SNAPSHOT_TYPE_LOCAL       = 1;
+-  SNAPSHOT_TYPE_EXTERNAL      = 2;
++  SNAPSHOT_TYPE_LOCAL = 1;
++  SNAPSHOT_TYPE_EXTERNAL = 2;
+ }
+ 
+ message ExternalSnapshotInfo {
+   string snapshot_uri_prefix = 1;
+ }
+ 
+ message LocalSnapshotInfo {
+   string snapshot_prefix = 1;
+   // Node VMs that have local snapshots for this actor, while it's PAUSED.
+   repeated string node_vms_with_local_snapshots = 2;
+ }
+ 
+ message SnapshotInfo {
+   SnapshotType type = 1;
+   oneof data {
+     ExternalSnapshotInfo external = 2;
+-    LocalSnapshotInfo    local    = 3;
++    LocalSnapshotInfo local = 3;
+   }
+ }
+ 
+ // Selector matches worker pools by label.
+ // Only equality-based matching is supported.
+ message Selector {
++  // +k8s:optional
++  // +k8s:maxProperties=10
++  // +k8s:alpha(since: "0.0")=+k8s:eachKey=+k8s:format=k8s-label-key
++  // +k8s:alpha(since: "0.0")=+k8s:eachVal=+k8s:format=k8s-label-value
+   map<string, string> match_labels = 1;
+ }
+ 
+ message Actor {
+   string actor_id = 1;
+-  int64  version  = 2;
++  int64 version = 2;
+ 
+   string actor_template_namespace = 3;
+-  string actor_template_name      = 4;
++  string actor_template_name = 4;
+ 
+   enum Status {
+     STATUS_UNSPECIFIED = 0;
+-    STATUS_RESUMING    = 1;
+-    STATUS_RUNNING     = 2;
+-    STATUS_SUSPENDING  = 3;
+-    STATUS_SUSPENDED   = 4;
+-    STATUS_PAUSING     = 5;
+-    STATUS_PAUSED      = 6;
++    STATUS_RESUMING = 1;
++    STATUS_RUNNING = 2;
++    STATUS_SUSPENDING = 3;
++    STATUS_SUSPENDED = 4;
++    STATUS_PAUSING = 5;
++    STATUS_PAUSED = 6;
+   }
+   Status status = 5;
+ 
+   string ateom_pod_namespace = 6;
+-  string ateom_pod_name      = 7;
+-  string ateom_pod_ip        = 8;
++  string ateom_pod_name = 7;
++  string ateom_pod_ip = 8;
+ 
+   // last_snapshot
+   reserved 9;
+   string in_progress_snapshot = 10;
+-  string ateom_pod_uid        = 11;
++  string ateom_pod_uid = 11;
+   SnapshotInfo latest_snapshot_info = 12;
+ 
+   // worker_selector is the per-actor placement constraint. The scheduler
+   // evaluates the AND of this selector and the template's workerSelector to
+   // find eligible pools. Set at CreateActor; may be updated at any time via
+   // UpdateActor. Changes take effect on the next ResumeActor call.
+   Selector worker_selector = 13;
+ 
+   // worker_pool_name is the name of the WorkerPool that owns the currently
+   // assigned worker, in the same namespace as ateom_pod_namespace (pool and
+   // pod namespaces always match). Set by the scheduler at assignment time
+   // and cleared when the worker is freed. Needed to release the worker on
+   // suspend/pause since eligibility is no longer a single fixed pool
+   // reference on the ActorTemplate.
+   string worker_pool_name = 14;
+ 
+   // The atespace this actor belongs to. Part of the actor's
+-  // resource identity; folded into the Redis key as actor:<atespace>:<actor_id>.
++  // resource identity; folded into the Redis key as
++  // actor:<atespace>:<actor_id>.
+   string atespace = 15;
+ }
+ 
+ // Atespace is the isolation boundary an Actor is created into.
+ message Atespace {
+   string name = 1;
+ }
+ 
+ // ActorRef identifies an actor: a name is only unique within its atespace.
+ message ActorRef {
++  // +k8s:required
++  // +k8s:format=k8s-short-name
+   string atespace = 1;
+-  string name     = 2;
++  // +k8s:required
++  // +k8s:format=k8s-short-name
++  string name = 2;
+ }
+ 
+ message CreateAtespaceRequest {
+   string name = 1;
+ }
+ message CreateAtespaceResponse {
+   Atespace atespace = 1;
+ }
+ 
+ message GetAtespaceRequest {
+@@ -172,90 +190,105 @@ message ListAtespacesRequest {}
+ message ListAtespacesResponse {
+   repeated Atespace atespaces = 1;
+ }
+ 
+ message DeleteAtespaceRequest {
+   string name = 1;
+ }
+ message DeleteAtespaceResponse {}
+ 
+ message GetActorRequest {
++  // +k8s:required
+   ActorRef actor_ref = 1;
+ }
+ 
+ message GetActorResponse {
+   Actor actor = 1;
+ }
+ 
+ // Request to create a new Actor.
+ message CreateActorRequest {
+-  // The new actor's atespace and actor_id (actor_id must be a valid DNS-1123 label).
++  // The new actor's atespace and actor_id (actor_id must be a valid DNS-1123
++  // label).
++  // +k8s:required
+   ActorRef actor_ref = 1;
+ 
+   // The namespace of the ActorTemplate to derive from.
++  // TODO: Use KubeNamespacedObjectRef
++  // +k8s:required
++  // +k8s:format=k8s-short-name
+   string actor_template_namespace = 2;
+ 
+   // The name of the ActorTemplate to derive from.
++  // +k8s:required
++  // +k8s:format=k8s-long-name
+   string actor_template_name = 3;
+ 
+   // worker_selector sets the actor's placement constraint at creation time.
+   // If empty, the actor matches any pool admitted by the template's selector.
++  // +k8s:optional
+   Selector worker_selector = 4;
+ }
+ 
+ message CreateActorResponse {
+   Actor actor = 1;
+ }
+ 
+ // Request to update mutable fields on an existing Actor.
+ // May be called regardless of the actor's current status.
+ // Changes take effect on the next ResumeActor call.
+ message UpdateActorRequest {
++  // +k8s:required
+   ActorRef actor_ref = 1;
+ 
+   // worker_selector replaces the actor's current placement constraint.
+   // Takes effect on the next ResumeActor call.
++  // +k8s:optional
+   Selector worker_selector = 2;
+ }
+ 
+ message UpdateActorResponse {
+   Actor actor = 1;
+ }
+ 
+ message SuspendActorRequest {
++  // +k8s:required
+   ActorRef actor_ref = 1;
+ }
+ 
+ message SuspendActorResponse {
+   Actor actor = 1;
+ }
+ 
+ message PauseActorRequest {
++  // +k8s:required
+   ActorRef actor_ref = 1;
+ }
+ 
+ message PauseActorResponse {
+   Actor actor = 1;
+ }
+ 
+ message ResumeActorRequest {
++  // +k8s:required
+   ActorRef actor_ref = 1;
+ 
+   // If true, skip golden snapshot and boot the workload from scratch.
+   bool boot = 2;
+ }
+ 
+ message ResumeActorResponse {
+   Actor actor = 1;
+ }
+ 
+ message DeleteActorRequest {
++  // +k8s:required
+   ActorRef actor_ref = 1;
+ }
+ 
+ message DeleteActorResponse {}
+ 
+ message ListWorkersRequest {}
+ 
+ message ListWorkersResponse {
+   repeated Worker workers = 1;
+ }
+@@ -279,41 +312,45 @@ message ListActorsRequest {
+ // Response for a ListActors operation.
+ message ListActorsResponse {
+   // The page of actors. This list may be empty even if there are more results.
+   repeated Actor actors = 1;
+ 
+   // An opaque token to retrieve the next page of results.
+   // If empty, there are no more results. Clients must loop until this is empty.
+   string next_page_token = 2;
+ }
+ 
++// +k8s:validation-gen=true
+ message Worker {
+   string worker_namespace = 1;
+-  string worker_pool      = 2;
+-  string worker_pod       = 3;
++  string worker_pool = 2;
++  string worker_pod = 3;
+ 
++  // +k8s:optional
+   Assignment assignment = 4;
+ 
+-  string ip              = 5;
+-  int64  version         = 6;
+-  string worker_pod_uid  = 7;
+-  string node_name       = 8;
++  string ip = 5;
++  int64 version = 6;
++  string worker_pod_uid = 7;
++  string node_name = 8;
+ }
+ 
+ message Assignment {
++  // +k8s:required
+   KubeNamespacedObjectRef actor_template = 1;
++  // +k8s:required
+   ActorRef actor = 2;
+ }
+ 
+ message KubeNamespacedObjectRef {
+   string namespace = 1;
+-  string name  = 2;
++  string name = 2;
+ }
+ 
+ message DebugClearRequest {}
+ 
+ message DebugClearResponse {}
+ 
+ // SessionIdentity allows substrate workloads to exchange their
+ // infrastructure-level credentials (k8s service account token, etc.) for a
+ // substrate session-level credential.  A given substrate session might migrate
+ // between many different physical workers over the course of its lifecycle,
+@@ -337,22 +374,22 @@ service SessionIdentity {
+   rpc MintJWT(MintJWTRequest) returns (MintJWTResponse);
+ 
+   // Request a Session Identity Certificate. To call this RPC, you must have
+   // authenticated with a client certificate, not a bearer token.
+   rpc MintCert(MintCertRequest) returns (MintCertResponse);
+ }
+ 
+ message MintJWTRequest {
+   repeated string audience = 1;
+ 
+-  string app_id     = 2;
+-  string user_id    = 3;
++  string app_id = 2;
++  string user_id = 3;
+   string session_id = 4;
+ }
+ 
+ message MintJWTResponse {
+   // Session JWT.  An OIDC Discovery-compatible JWT
+   //
+   // Claims:
+   //
+   // * iss: Issuer - a valid URL where a relying party can fetch the OIDC
+   //   discovery documents.
+@@ -365,26 +402,26 @@ message MintJWTResponse {
+   // * exp: Expiration - a numeric unix timestamp
+   // * iat: Issued At - a numeric unix timestamp
+   // * `ate.dev`: Ate/Substrate Extension - JSON object
+   //   * appID: (string) The Substrate App ID
+   //   * userID: (string) The Substrate User ID
+   //   * sessionID: (string) The Substrate Session ID
+   string session_jwt = 1;
+ }
+ 
+ message MintCertRequest {
+-  string app_id     = 1;
+-  string user_id    = 2;
++  string app_id = 1;
++  string user_id = 2;
+   string session_id = 3;
+ 
+   // Request contains DER encoded bytes of a x509 certificate signing request.
+   // The signer will ignore the contents of the CSR except to extract the
+   // subject public key.
+   bytes certificate_signing_request = 4;
+ }
+ 
+ message MintCertResponse {
+-  // Response contains a list of DER encoded certificates. The first entry is the
+-  // leaf certificate, and any remaining entries are intermediates in
++  // Response contains a list of DER encoded certificates. The first entry is
++  // the leaf certificate, and any remaining entries are intermediates in
+   // leaf-to-root order.
+   repeated bytes session_certificates = 1;
+ }
+diff --git pkg/proto/ateapipb/validate.go pkg/proto/ateapipb/validate.go
+new file mode 100644
+index 00000000..cc2341dd
+--- /dev/null
++++ pkg/proto/ateapipb/validate.go
+@@ -0,0 +1,47 @@
++// Copyright 2026 Google LLC
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package ateapipb
++
++import (
++	"context"
++
++	codes "google.golang.org/grpc/codes"
++	status "google.golang.org/grpc/status"
++	operation "k8s.io/apimachinery/pkg/api/operation"
++)
++
++func (x *CreateActorRequest) Validate(ctx context.Context) error {
++	op := operation.Operation{Type: operation.Create}
++	errs := Validate_CreateActorRequest(ctx, op, nil, x, nil)
++
++	if len(errs) > 0 {
++		result := status.New(codes.InvalidArgument, errs.ToAggregate().Error())
++		for _, e := range errs {
++			detail := ValidationError{
++				Type:   string(e.Type),
++				Field:  e.Field,
++				Detail: e.Detail,
++				Origin: e.Origin,
++			}
++			newResult, err := result.WithDetails(&detail)
++			if err != nil {
++				return status.Errorf(codes.Internal, "Unexpected error attaching details to error: %v", err)
++			}
++			result = newResult
++		}
++		return result.Err()
++	}
++	return nil
++}
