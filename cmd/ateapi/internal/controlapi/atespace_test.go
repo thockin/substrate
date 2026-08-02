@@ -16,6 +16,7 @@ package controlapi
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
@@ -60,7 +61,11 @@ func TestValidateCreateAtespaceRequest(t *testing.T) {
 	}, {
 		"invalid metadata.name",
 		valid(func(a *ateapipb.Atespace) { a.Metadata.Name = "Team_A" }),
-		field.ErrorList{field.Invalid(field.NewPath("atespace", "metadata", "name"), "Team_A", "")},
+		field.ErrorList{field.Invalid(field.NewPath("atespace", "metadata", "name"), "", "").WithOrigin("format=k8s-short-name")},
+	}, {
+		"too-long metadata.name",
+		valid(func(a *ateapipb.Atespace) { a.Metadata.Name = strings.Repeat("x", 64) }),
+		field.ErrorList{field.Invalid(field.NewPath("atespace", "metadata", "name"), "", "").WithOrigin("format=k8s-short-name")},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

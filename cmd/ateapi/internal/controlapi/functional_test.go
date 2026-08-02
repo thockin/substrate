@@ -3315,11 +3315,7 @@ func TestCreateAtespace_Success(t *testing.T) {
 	resp, err := tc.client.CreateAtespace(context.Background(), &ateapipb.CreateAtespaceRequest{
 		Atespace: &ateapipb.Atespace{
 			Metadata: &ateapipb.ResourceMetadata{
-				Name:       "team-a",
-				Uid:        "caller-supplied-uid",
-				Version:    999,
-				CreateTime: timestamppb.New(time.Unix(1, 0)),
-				UpdateTime: timestamppb.New(time.Unix(1, 0)),
+				Name: "team-a",
 			},
 		},
 	})
@@ -3502,7 +3498,7 @@ func TestDeleteAtespace_NotFound(t *testing.T) {
 
 func assertValidateErr(t *testing.T, got field.ErrorList, want field.ErrorList) {
 	t.Helper()
-	field.ErrorMatcher{}.ByType().ByField().ByValue().Test(t, want, got)
+	field.ErrorMatcher{}.ByType().ByField().ByOrigin().Test(t, want, got)
 }
 
 // TestSuspendActor_FromPaused suspends a PAUSED actor end-to-end: instead of

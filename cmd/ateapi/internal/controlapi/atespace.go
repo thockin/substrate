@@ -50,18 +50,15 @@ func (s *Service) CreateAtespace(ctx context.Context, req *ateapipb.CreateAtespa
 }
 
 func validateCreateAtespaceRequest(ctx context.Context, req *ateapipb.CreateAtespaceRequest) field.ErrorList {
-	var fldPath *field.Path
 	errs := req.Validate(ctx) // TODO: move to caller when all manual validation is removed.
 
 	atespace := req.GetAtespace()
-	atespacePath := fldPath.Child("atespace")
 	if atespace == nil {
 		// handled by DV
 		return errs
 	}
 
 	meta := atespace.GetMetadata()
-	metaPath := atespacePath.Child("metadata")
 	if meta == nil {
 		// handled by DV
 		return errs
@@ -70,10 +67,10 @@ func validateCreateAtespaceRequest(ctx context.Context, req *ateapipb.CreateAtes
 	if val := meta.GetAtespace(); val != "" {
 		// handled by DV
 	}
-	if val, p := meta.GetName(), metaPath.Child("name"); val == "" {
+	if val := meta.GetName(); val == "" {
 		// handled by DV
 	} else {
-		errs = append(errs, resources.ValidateResourceName(val, p)...)
+		// handled by DV
 	}
 
 	return errs
