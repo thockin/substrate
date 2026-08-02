@@ -292,6 +292,8 @@ message ActorSnapshotTag {
 // metadata.atespace is always empty; the atespace's identity is metadata.name.
 message Atespace {
   // Common resource metadata: name, uid, version, timestamps.
+  //
+  // +k8s:required
   ResourceMetadata metadata = 1;
 }
 
