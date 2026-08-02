@@ -25,3 +25,8 @@ func (x *CreateAtespaceRequest) Validate(ctx context.Context) field.ErrorList {
 	op := operation.Operation{Type: operation.Create}
 	return Validate_CreateAtespaceRequest(ctx, op, nil, x, nil)
 }
+
+func (x *CreateActorRequest) Validate(ctx context.Context) field.ErrorList {
+	op := operation.Operation{Type: operation.Create}
+	return Validate_CreateActorRequest(ctx, op, nil, x, nil)
+}

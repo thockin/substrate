@@ -88,6 +88,45 @@ func Validate_Atespace(
 	return errs
 }
 
+// Validate_CreateActorRequest validates an instance of CreateActorRequest according
+// to declarative validation rules in the API schema.
+func Validate_CreateActorRequest(
+	ctx context.Context, op operation.Operation, fldPath *field.Path,
+	obj, oldObj *CreateActorRequest) (errs field.ErrorList) {
+
+	{ // field CreateActorRequest.Actor
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *Actor,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if equality.Semantic.DeepEqual(obj, oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *CreateActorRequest) *Actor {
+				return oldObj.Actor
+			})
+		errs = append(errs, fn(fldPath.Child("actor"), obj.Actor, oldVal, oldObj != nil)...)
+	}
+
+	// field CreateActorRequest.SourceSnapshot has no validation
+	return errs
+}
+
 // Validate_CreateAtespaceRequest validates an instance of CreateAtespaceRequest according
 // to declarative validation rules in the API schema.
 func Validate_CreateAtespaceRequest(
