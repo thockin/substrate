@@ -470,9 +470,15 @@ type ResourceMetadata struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// atespace is the namespace the resource belongs to. Empty for global-scoped
 	// resources. Caller-specified at creation and immutable thereafter.
+	//
+	// Atespaced resources should add +k8s:subfield(atespace)=+k8s:required
+	// Non-atespaced resources should add +k8s:subfield(atespace)=+k8s:forbidden
+	// +k8s:optional
 	Atespace string `protobuf:"bytes,1,opt,name=atespace,proto3" json:"atespace,omitempty"`
 	// name is the resource's name, unique within its atespace (or globally, for
 	// global-scoped resources). Caller-specified at creation and immutable thereafter.
+	//
+	// +k8s:required
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// uid is a server-assigned, globally unique identifier for this resource.
 	// Immutable throughout the lifecycle of the resource.
@@ -644,6 +650,7 @@ func (x *ExternalVolume) GetVolumeContext() map[string]string {
 type Actor struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Common resource metadata: atespace, name, uid, version, timestamps.
+	// +k8s:opaqueType
 	Metadata               *ResourceMetadata `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	ActorTemplateNamespace string            `protobuf:"bytes,2,opt,name=actor_template_namespace,json=actorTemplateNamespace,proto3" json:"actor_template_namespace,omitempty"`
 	ActorTemplateName      string            `protobuf:"bytes,3,opt,name=actor_template_name,json=actorTemplateName,proto3" json:"actor_template_name,omitempty"`
@@ -870,16 +877,17 @@ func (x *WorkerAssignment) GetWorkerPodIp() string {
 // ActorSnapshot is an independently addressable durable Actor snapshot. Its
 // contents are immutable.
 type ActorSnapshot struct {
-	state                  protoimpl.MessageState `protogen:"open.v1"`
-	Metadata               *ResourceMetadata      `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
-	SourceActor            *ObjectRef             `protobuf:"bytes,2,opt,name=source_actor,json=sourceActor,proto3" json:"source_actor,omitempty"`
-	SourceActorUid         string                 `protobuf:"bytes,3,opt,name=source_actor_uid,json=sourceActorUid,proto3" json:"source_actor_uid,omitempty"`
-	SourceActorVersion     int64                  `protobuf:"varint,4,opt,name=source_actor_version,json=sourceActorVersion,proto3" json:"source_actor_version,omitempty"`
-	ActorTemplateNamespace string                 `protobuf:"bytes,5,opt,name=actor_template_namespace,json=actorTemplateNamespace,proto3" json:"actor_template_namespace,omitempty"`
-	ActorTemplateName      string                 `protobuf:"bytes,6,opt,name=actor_template_name,json=actorTemplateName,proto3" json:"actor_template_name,omitempty"`
-	ActorTemplateUid       string                 `protobuf:"bytes,7,opt,name=actor_template_uid,json=actorTemplateUid,proto3" json:"actor_template_uid,omitempty"`
-	ContentScope           SnapshotContentScope   `protobuf:"varint,8,opt,name=content_scope,json=contentScope,proto3,enum=ateapi.SnapshotContentScope" json:"content_scope,omitempty"`
-	SnapshotUri            string                 `protobuf:"bytes,9,opt,name=snapshot_uri,json=snapshotUri,proto3" json:"snapshot_uri,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// +k8s:opaqueType
+	Metadata               *ResourceMetadata    `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	SourceActor            *ObjectRef           `protobuf:"bytes,2,opt,name=source_actor,json=sourceActor,proto3" json:"source_actor,omitempty"`
+	SourceActorUid         string               `protobuf:"bytes,3,opt,name=source_actor_uid,json=sourceActorUid,proto3" json:"source_actor_uid,omitempty"`
+	SourceActorVersion     int64                `protobuf:"varint,4,opt,name=source_actor_version,json=sourceActorVersion,proto3" json:"source_actor_version,omitempty"`
+	ActorTemplateNamespace string               `protobuf:"bytes,5,opt,name=actor_template_namespace,json=actorTemplateNamespace,proto3" json:"actor_template_namespace,omitempty"`
+	ActorTemplateName      string               `protobuf:"bytes,6,opt,name=actor_template_name,json=actorTemplateName,proto3" json:"actor_template_name,omitempty"`
+	ActorTemplateUid       string               `protobuf:"bytes,7,opt,name=actor_template_uid,json=actorTemplateUid,proto3" json:"actor_template_uid,omitempty"`
+	ContentScope           SnapshotContentScope `protobuf:"varint,8,opt,name=content_scope,json=contentScope,proto3,enum=ateapi.SnapshotContentScope" json:"content_scope,omitempty"`
+	SnapshotUri            string               `protobuf:"bytes,9,opt,name=snapshot_uri,json=snapshotUri,proto3" json:"snapshot_uri,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
 }
@@ -980,10 +988,11 @@ func (x *ActorSnapshot) GetSnapshotUri() string {
 // ActorSnapshotTag is an immutable, Atespace-owned alias and retention pin.
 // Its owning Atespace cannot be deleted until the tag is removed.
 type ActorSnapshotTag struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Metadata      *ResourceMetadata      `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
-	Snapshot      *ObjectRef             `protobuf:"bytes,2,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
-	Scope         ActorSnapshotTagScope  `protobuf:"varint,3,opt,name=scope,proto3,enum=ateapi.ActorSnapshotTagScope" json:"scope,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// +k8s:opaqueType
+	Metadata      *ResourceMetadata     `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	Snapshot      *ObjectRef            `protobuf:"bytes,2,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	Scope         ActorSnapshotTagScope `protobuf:"varint,3,opt,name=scope,proto3,enum=ateapi.ActorSnapshotTagScope" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1046,6 +1055,7 @@ type Atespace struct {
 	// Common resource metadata: name, uid, version, timestamps.
 	//
 	// +k8s:required
+	// +k8s:beta(since: "0.0")=+k8s:subfield(atespace)=+k8s:forbidden # TODO: remove "beta" prefix
 	Metadata      *ResourceMetadata `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

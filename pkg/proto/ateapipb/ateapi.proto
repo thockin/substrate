@@ -117,10 +117,16 @@ message Selector {
 message ResourceMetadata {
   // atespace is the namespace the resource belongs to. Empty for global-scoped
   // resources. Caller-specified at creation and immutable thereafter.
+  //
+  // Atespaced resources should add +k8s:subfield(atespace)=+k8s:required
+  // Non-atespaced resources should add +k8s:subfield(atespace)=+k8s:forbidden
+  // +k8s:optional
   string atespace = 1;
 
   // name is the resource's name, unique within its atespace (or globally, for
   // global-scoped resources). Caller-specified at creation and immutable thereafter.
+  //
+  // +k8s:required
   string name = 2;
 
   // uid is a server-assigned, globally unique identifier for this resource.
@@ -165,6 +171,7 @@ message ExternalVolume {
 
 message Actor {
   // Common resource metadata: atespace, name, uid, version, timestamps.
+  // +k8s:opaqueType
   ResourceMetadata metadata = 1;
 
   string actor_template_namespace = 2;
@@ -232,6 +239,7 @@ message WorkerAssignment {
 // ActorSnapshot is an independently addressable durable Actor snapshot. Its
 // contents are immutable.
 message ActorSnapshot {
+  // +k8s:opaqueType
   ResourceMetadata metadata = 1;
   ObjectRef source_actor = 2;
   string source_actor_uid = 3;
@@ -246,6 +254,7 @@ message ActorSnapshot {
 // ActorSnapshotTag is an immutable, Atespace-owned alias and retention pin.
 // Its owning Atespace cannot be deleted until the tag is removed.
 message ActorSnapshotTag {
+  // +k8s:opaqueType
   ResourceMetadata metadata = 1;
   ObjectRef snapshot = 2;
   ActorSnapshotTagScope scope = 3;
@@ -257,6 +266,7 @@ message Atespace {
   // Common resource metadata: name, uid, version, timestamps.
   //
   // +k8s:required
+  // +k8s:beta(since: "0.0")=+k8s:subfield(atespace)=+k8s:forbidden # TODO: remove "beta" prefix
   ResourceMetadata metadata = 1;
 }
 
