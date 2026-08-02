@@ -24,7 +24,12 @@ import (
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+<<<<<<< HEAD
 	"k8s.io/apimachinery/pkg/api/operation"
+||||||| parent of 996c0942 (WIP: update)
+=======
+	"google.golang.org/protobuf/proto"
+>>>>>>> 996c0942 (WIP: update)
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
@@ -42,9 +47,21 @@ func (s *Service) UpdateActor(ctx context.Context, req *ateapipb.UpdateActorRequ
 	actorRef := resources.ActorRefFromActor(in)
 	setSpanActorRefAttributes(ctx, actorRef)
 
+<<<<<<< HEAD
 	updated, err := s.persistence.UpdateActor(ctx, actorRef, func(dbActor *ateapipb.Actor) error {
 		if err := store.CheckActorPrecondition(dbActor, in.GetMetadata().GetUid(), in.GetMetadata().GetVersion()); err != nil {
 			return err
+||||||| parent of 09fda2d3 (WIP: update)
+	actor, err := s.persistence.GetActor(ctx, actorRef)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "Actor %s not found", actorRef)
+=======
+	oldActor, err := s.persistence.GetActor(ctx, actorRef)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "Actor %s not found", actorRef)
+>>>>>>> 09fda2d3 (WIP: update)
 		}
 <<<<<<< HEAD
 		applyUpdateMask(dbActor, in, req.GetUpdateMask(), actorMutableFields)
@@ -69,6 +86,13 @@ func (s *Service) UpdateActor(ctx context.Context, req *ateapipb.UpdateActorRequ
 	updated, err := s.persistence.UpdateActor(ctx, actor, expectedVersion)
 =======
 		return nil, fmt.Errorf("while getting actor: %w", err)
+	}
+	newActor := proto.CloneOf(oldActor)
+	//TODO: preserve the original create_time
+	newActor.Metadata = setMetadataForUpdate(oldActor.GetMetadata()) // FIXME: don't need to clone inside anymore
+	newActor.WorkerSelector = req.GetWorkerSelector()
+	if errs := newActor.ValidateUpdate(ctx, oldActor); len(errs) > 0 {
+		return nil, toGRPCStatusError(errs)
 	}
 
 	// UID and version preconditions

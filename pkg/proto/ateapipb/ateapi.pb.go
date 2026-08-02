@@ -479,6 +479,7 @@ type ResourceMetadata struct {
 	// Atespaced resources should add +k8s:subfield(atespace)=+k8s:required
 	// Non-atespaced resources should add +k8s:subfield(atespace)=+k8s:forbidden
 	// +k8s:optional
+	// +k8s:update=NoUnset
 	// +k8s:format=k8s-short-name
 	Atespace string `protobuf:"bytes,1,opt,name=atespace,proto3" json:"atespace,omitempty"`
 	// name is the resource's name, unique within its atespace (or globally, for
@@ -678,9 +679,11 @@ type Actor struct {
 	Metadata *ResourceMetadata `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	// +k8s:required
 	// +k8s:format=k8s-short-name
+	// +k8s:immutable
 	ActorTemplateNamespace string `protobuf:"bytes,2,opt,name=actor_template_namespace,json=actorTemplateNamespace,proto3" json:"actor_template_namespace,omitempty"`
 	// +k8s:required
 	// +k8s:format=k8s-long-name
+	// +k8s:immutable
 	ActorTemplateName string `protobuf:"bytes,3,opt,name=actor_template_name,json=actorTemplateName,proto3" json:"actor_template_name,omitempty"`
 	// status is the actor's current lifecycle state, set by the system.
 	// User-provided values are ignored.
@@ -688,6 +691,7 @@ type Actor struct {
 	// +k8s:optional
 	// +k8s:minimum=1
 	// +k8s:maximum=8
+	// +k8s:update=NoUnset
 	Status Actor_Status `protobuf:"varint,4,opt,name=status,proto3,enum=ateapi.Actor_Status" json:"status,omitempty"`
 	// worker_assignment points at the worker currently hosting this Actor.
 	// Unset whenever the Actor has no worker (SUSPENDED, PAUSED, CRASHED).

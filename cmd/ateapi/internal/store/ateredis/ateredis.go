@@ -776,6 +776,7 @@ func (s *Persistence) UpdateActor(ctx context.Context, actorRef resources.ActorR
 			}
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 			// Snapshot the stored state before handing the actor to mutate.
 			// mutate is free to edit anything it is given.
 			actorBeforeMutation := proto.Clone(currentActor).(*ateapipb.Actor)
@@ -809,15 +810,22 @@ func (s *Persistence) UpdateActor(ctx context.Context, actorRef resources.ActorR
 		// The stored metadata is authoritative; derive the next metadata from it.
 		dbActor.Metadata = newUpdateMetadata(currentActor.GetMetadata())
 =======
+||||||| parent of 09fda2d3 (WIP: update)
+=======
+		//TODO: add uid precondition, do this in a common place
+>>>>>>> 09fda2d3 (WIP: update)
 		if currentActor.GetMetadata().GetVersion() != expectedVersion {
 			return store.ErrVersionConflict
 		}
+		//TODO: this should get checked in a common place
 		if currentActor.GetMetadata().GetName() != newActor.GetMetadata().GetName() {
 			return fmt.Errorf("name is immutable")
 		}
+		//TODO: this should get checked in a common place
 		if currentActor.GetMetadata().GetAtespace() != newActor.GetMetadata().GetAtespace() {
 			return fmt.Errorf("atespace is immutable")
 		}
+<<<<<<< HEAD
 		if currentActor.GetActorTemplateNamespace() != newActor.GetActorTemplateNamespace() {
 			return fmt.Errorf("actor_template_namespace is immutable")
 		}
@@ -825,6 +833,15 @@ func (s *Persistence) UpdateActor(ctx context.Context, actorRef resources.ActorR
 			return fmt.Errorf("actor_template_name is immutable")
 		}
 >>>>>>> e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
+||||||| parent of 09fda2d3 (WIP: update)
+		if currentActor.GetActorTemplateNamespace() != newActor.GetActorTemplateNamespace() {
+			return fmt.Errorf("actor_template_namespace is immutable")
+		}
+		if currentActor.GetActorTemplateName() != newActor.GetActorTemplateName() {
+			return fmt.Errorf("actor_template_name is immutable")
+		}
+=======
+>>>>>>> 09fda2d3 (WIP: update)
 
 <<<<<<< HEAD
 			newVal, err := protojson.Marshal(currentActor)
