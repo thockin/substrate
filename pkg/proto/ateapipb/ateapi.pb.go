@@ -676,8 +676,14 @@ type Actor struct {
 	ActorTemplateNamespace string `protobuf:"bytes,2,opt,name=actor_template_namespace,json=actorTemplateNamespace,proto3" json:"actor_template_namespace,omitempty"`
 	// +k8s:required
 	// +k8s:format=k8s-long-name
-	ActorTemplateName string       `protobuf:"bytes,3,opt,name=actor_template_name,json=actorTemplateName,proto3" json:"actor_template_name,omitempty"`
-	Status            Actor_Status `protobuf:"varint,4,opt,name=status,proto3,enum=ateapi.Actor_Status" json:"status,omitempty"`
+	ActorTemplateName string `protobuf:"bytes,3,opt,name=actor_template_name,json=actorTemplateName,proto3" json:"actor_template_name,omitempty"`
+	// status is the actor's current lifecycle state, set by the system.
+	// User-provided values are ignored.
+	//
+	// +k8s:optional
+	// +k8s:minimum=1
+	// +k8s:maximum=8
+	Status Actor_Status `protobuf:"varint,4,opt,name=status,proto3,enum=ateapi.Actor_Status" json:"status,omitempty"`
 	// worker_assignment points at the worker currently hosting this Actor.
 	// Unset whenever the Actor has no worker (SUSPENDED, PAUSED, CRASHED).
 	WorkerAssignment       *WorkerAssignment `protobuf:"bytes,5,opt,name=worker_assignment,json=workerAssignment,proto3" json:"worker_assignment,omitempty"`
