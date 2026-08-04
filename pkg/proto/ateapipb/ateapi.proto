@@ -222,6 +222,8 @@ message Actor {
 
   // worker_assignment points at the worker currently hosting this Actor.
   // Unset whenever the Actor has no worker (SUSPENDED, PAUSED, CRASHED).
+  //
+  // +k8s:optional
   WorkerAssignment worker_assignment = 5;
 
   string in_progress_snapshot_name = 6;
@@ -251,12 +253,20 @@ message Actor {
 // WorkerAssignment identifies the Worker currently hosting an Actor.
 message WorkerAssignment {
   // worker_namespace is the Kubernetes namespace of the WorkerPool and worker Pod.
+  //
+  // +k8s:required
+  // +k8s:format=k8s-short-name
   string worker_namespace = 1;
 
   // worker_pool is the name of the WorkerPool the worker belongs to.
+  // +k8s:required
+  // +k8s:format=k8s-long-name
   string worker_pool = 2;
 
   // worker_pod is the name of the Kubernetes pod hosting the Actor.
+  //
+  // +k8s:required
+  // +k8s:format=k8s-long-name
   string worker_pod = 3;
 
   // worker_pod_uid is the Kubernetes UID of worker_pod.

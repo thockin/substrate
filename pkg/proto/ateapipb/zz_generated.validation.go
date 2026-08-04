@@ -179,13 +179,43 @@ func Validate_Actor(
 		errs = append(errs, fn(fldPath.Child("status"), &obj.Status, oldVal, oldObj != nil)...)
 	}
 
-	// field Actor.WorkerAssignment has no validation
-	// field Actor.InProgressSnapshot has no validation
+	{ // field Actor.WorkerAssignment
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *WorkerAssignment,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if equality.Semantic.DeepEqual(obj, oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.OptionalPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			// call the type's validation function
+			errs = append(errs, Validate_WorkerAssignment(ctx, op, fldPath, obj, oldObj)...)
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *Actor) *WorkerAssignment {
+				return oldObj.WorkerAssignment
+			})
+		errs = append(errs, fn(fldPath.Child("worker_assignment"), obj.WorkerAssignment, oldVal, oldObj != nil)...)
+	}
+
+	// field Actor.InProgressSnapshotName has no validation
 	// field Actor.WorkerSelector has no validation
 	// field Actor.LatestSnapshot has no validation
 	// field Actor.LocalSnapshotInfo has no validation
 	// field Actor.InProgressSnapshotSourceActorVersion has no validation
 	// field Actor.ActorVolumes has no validation
+	// field Actor.InProgressLocalSnapshotName has no validation
 	return errs
 }
 
@@ -462,5 +492,112 @@ func Validate_ResourceMetadata(
 
 	// field ResourceMetadata.CreateTime has no validation
 	// field ResourceMetadata.UpdateTime has no validation
+	return errs
+}
+
+// Validate_WorkerAssignment validates an instance of WorkerAssignment according
+// to declarative validation rules in the API schema.
+func Validate_WorkerAssignment(
+	ctx context.Context, op operation.Operation, fldPath *field.Path,
+	obj, oldObj *WorkerAssignment) (errs field.ErrorList) {
+
+	{ // field WorkerAssignment.WorkerNamespace
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *string,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			if e := validate.ShortName(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *WorkerAssignment) *string {
+				return &oldObj.WorkerNamespace
+			})
+		errs = append(errs, fn(fldPath.Child("worker_namespace"), &obj.WorkerNamespace, oldVal, oldObj != nil)...)
+	}
+
+	{ // field WorkerAssignment.WorkerPool
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *string,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			if e := validate.LongName(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *WorkerAssignment) *string {
+				return &oldObj.WorkerPool
+			})
+		errs = append(errs, fn(fldPath.Child("worker_pool"), &obj.WorkerPool, oldVal, oldObj != nil)...)
+	}
+
+	{ // field WorkerAssignment.WorkerPod
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *string,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			if e := validate.LongName(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *WorkerAssignment) *string {
+				return &oldObj.WorkerPod
+			})
+		errs = append(errs, fn(fldPath.Child("worker_pod"), &obj.WorkerPod, oldVal, oldObj != nil)...)
+	}
+
+	// field WorkerAssignment.WorkerPodUid has no validation
+	// field WorkerAssignment.WorkerPodIp has no validation
 	return errs
 }
