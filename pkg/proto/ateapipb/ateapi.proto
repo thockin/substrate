@@ -307,6 +307,9 @@ message WorkerAssignment {
   string worker_pod = 3;
 
   // worker_pod_uid is the Kubernetes UID of worker_pod.
+  //
+  // +k8s:required
+  // +k8s:format=k8s-uuid
   string worker_pod_uid = 4;
 
   // worker_pod_ip is the IP of worker_pod.

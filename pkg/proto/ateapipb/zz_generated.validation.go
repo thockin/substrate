@@ -599,7 +599,37 @@ func Validate_WorkerAssignment(
 		errs = append(errs, fn(fldPath.Child("worker_pod"), &obj.WorkerPod, oldVal, oldObj != nil)...)
 	}
 
-	// field WorkerAssignment.WorkerPodUid has no validation
+	{ // field WorkerAssignment.WorkerPodUid
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *string,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			if e := validate.UUID(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *WorkerAssignment) *string {
+				return &oldObj.WorkerPodUid
+			})
+		errs = append(errs, fn(fldPath.Child("worker_pod_uid"), &obj.WorkerPodUid, oldVal, oldObj != nil)...)
+	}
 
 	{ // field WorkerAssignment.WorkerPodIp
 		fn := func(
