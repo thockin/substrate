@@ -38,3 +38,8 @@ func ValidateCustom_WorkerAssignment_WorkerPodIp(_ context.Context, _ operation.
 	}
 	return validation.IsValidIP(fldPath, *value)
 }
+
+func (x *UpdateActorRequest) Validate(ctx context.Context) field.ErrorList {
+	op := operation.Operation{Type: operation.Update}
+	return Validate_UpdateActorRequest(ctx, op, nil, x, nil)
+}

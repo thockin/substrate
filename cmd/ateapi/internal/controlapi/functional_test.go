@@ -2339,42 +2339,36 @@ func TestUpdateActor_Success(t *testing.T) {
 
 	createTemplate(t, tc, ns)
 
-	_, err := tc.client.CreateActor(context.Background(), &ateapipb.CreateActorRequest{Actor: &ateapipb.Actor{
-		Metadata:               &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: "id1"},
-		ActorTemplateNamespace: ns,
-		ActorTemplateName:      "tmpl1",
-		WorkerSelector: &ateapipb.Selector{
+	createActor := validActor(func(a *ateapipb.Actor) {
+		a.Metadata.Atespace = testAtespace
+		a.Metadata.Name = "id1"
+		a.ActorTemplateNamespace = ns
+		a.ActorTemplateName = "tmpl1"
+		a.WorkerSelector = &ateapipb.Selector{
 			MatchLabels: map[string]string{"tier": "free"},
-		},
-	}})
+		}
+		a.WorkerAssignment = nil
+	})
+	createResp, err := tc.client.CreateActor(context.Background(), &ateapipb.CreateActorRequest{Actor: createActor})
 	if err != nil {
 		t.Fatalf("CreateActor failed: %v", err)
 	}
 
+	updateActor := proto.CloneOf(createResp)
+	updateActor.WorkerSelector.MatchLabels["tier"] = "paid"
+	updateActor.Status = ateapipb.Actor_STATUS_RUNNING // Output-only fields outside the mask are ignored.
 	updateResp, err := tc.client.UpdateActor(context.Background(), &ateapipb.UpdateActorRequest{
-		Actor: &ateapipb.Actor{
-			Metadata: &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: "id1"},
-			WorkerSelector: &ateapipb.Selector{
-				MatchLabels: map[string]string{"tier": "paid"},
-			},
-			// Output-only fields outside the mask are ignored.
-			Status: ateapipb.Actor_STATUS_RUNNING,
-		},
+		Actor:      updateActor,
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"worker_selector"}},
 	})
 	if err != nil {
 		t.Fatalf("UpdateActor failed: %v", err)
 	}
 
-	wantActor := &ateapipb.Actor{
-		Metadata:               &ateapipb.ResourceMetadata{Name: "id1", Atespace: testAtespace, Version: 2},
-		ActorTemplateNamespace: ns,
-		ActorTemplateName:      "tmpl1",
-		Status:                 ateapipb.Actor_STATUS_SUSPENDED,
-		WorkerSelector: &ateapipb.Selector{
-			MatchLabels: map[string]string{"tier": "paid"},
-		},
-	}
+	wantActor := proto.CloneOf(createActor)
+	wantActor.Metadata.Version = 2
+	wantActor.WorkerSelector.MatchLabels["tier"] = "paid"
+	wantActor.Status = ateapipb.Actor_STATUS_SUSPENDED
 	if diff := cmp.Diff(wantActor, updateResp, protocmp.Transform(), ignoreUID, ignoreTimestamps); diff != "" {
 		t.Errorf("UpdateActor response mismatch (-want +got):\n%s", diff)
 	}
@@ -2398,14 +2392,16 @@ func TestUpdateActor_Preconditions(t *testing.T) {
 
 	createTemplate(t, tc, ns)
 
+	baseActor := validActor(func(a *ateapipb.Actor) {
+		a.Metadata.Atespace = testAtespace
+		a.Metadata.Name = testActorID
+		a.ActorTemplateNamespace = ns
+		a.ActorTemplateName = "tmpl1"
+	})
 	ctx := context.Background()
 	createActor := func() *ateapipb.Actor {
 		t.Helper()
-		actor, err := tc.client.CreateActor(ctx, &ateapipb.CreateActorRequest{Actor: &ateapipb.Actor{
-			Metadata:               &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: testActorID},
-			ActorTemplateNamespace: ns,
-			ActorTemplateName:      "tmpl1",
-		}})
+		actor, err := tc.client.CreateActor(ctx, &ateapipb.CreateActorRequest{Actor: baseActor})
 		if err != nil {
 			t.Fatalf("CreateActor failed: %v", err)
 		}
@@ -2413,12 +2409,12 @@ func TestUpdateActor_Preconditions(t *testing.T) {
 	}
 
 	update := func(meta *ateapipb.ResourceMetadata, tier string) (*ateapipb.Actor, error) {
+		actorForUpdate := proto.CloneOf(baseActor)
 		meta.Atespace, meta.Name = testAtespace, testActorID
+		actorForUpdate.Metadata = meta
+		actorForUpdate.WorkerSelector = &ateapipb.Selector{MatchLabels: map[string]string{"tier": tier}}
 		return tc.client.UpdateActor(ctx, &ateapipb.UpdateActorRequest{
-			Actor: &ateapipb.Actor{
-				Metadata:       meta,
-				WorkerSelector: &ateapipb.Selector{MatchLabels: map[string]string{"tier": tier}},
-			},
+			Actor:      actorForUpdate,
 			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"worker_selector"}},
 		})
 	}
@@ -2485,7 +2481,10 @@ func TestUpdateActor_NotFound(t *testing.T) {
 	defer tc.cleanup()
 
 	_, err := tc.client.UpdateActor(context.Background(), &ateapipb.UpdateActorRequest{
-		Actor:      &ateapipb.Actor{Metadata: &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: "does-not-exist"}},
+		Actor: validActor(func(a *ateapipb.Actor) {
+			a.Metadata.Atespace = testAtespace
+			a.Metadata.Name = "does-not-exist"
+		}),
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"worker_selector"}},
 	})
 	assertGrpcError(t, err, codes.NotFound, "actor test-atespace/does-not-exist not found")
@@ -2687,39 +2686,43 @@ func TestResumeActor_ReleasesStaleWorkerWhenPoolBecomesIneligible(t *testing.T) 
 	createWorkerPod(t, tc, ns, "worker-a", "node1", "pool-a")
 	createWorkerPod(t, tc, ns, "worker-b", "node1", "pool-b")
 
-	name := "id1"
-	_, err := tc.client.CreateActor(context.Background(), &ateapipb.CreateActorRequest{Actor: &ateapipb.Actor{
-		Metadata:               &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: name},
-		ActorTemplateNamespace: ns,
-		ActorTemplateName:      "tmpl1",
-		WorkerSelector:         &ateapipb.Selector{MatchLabels: map[string]string{"tier": "a"}},
-	}})
+	baseActor := validActor(func(a *ateapipb.Actor) {
+		a.Metadata.Atespace = testAtespace //FIXME
+		a.ActorTemplateNamespace = ns
+		a.ActorTemplateName = "tmpl1"
+		a.WorkerSelector = &ateapipb.Selector{MatchLabels: map[string]string{"tier": "a"}}
+	})
+	refActor := &ateapipb.ObjectRef{
+		Atespace: baseActor.Metadata.Atespace,
+		Name:     baseActor.Metadata.Name,
+	}
+
+	_, err := tc.client.CreateActor(context.Background(), &ateapipb.CreateActorRequest{Actor: baseActor})
 	if err != nil {
 		t.Fatalf("CreateActor failed: %v", err)
 	}
 
 	tc.fakeAtelet.FailRun = fmt.Errorf("mock atelet failure")
-	_, err = tc.client.ResumeActor(context.Background(), &ateapipb.ResumeActorRequest{Actor: &ateapipb.ObjectRef{Atespace: testAtespace, Name: name}})
+	_, err = tc.client.ResumeActor(context.Background(), &ateapipb.ResumeActorRequest{Actor: refActor})
 	if err == nil {
 		t.Fatalf("expected first ResumeActor (onto worker-a) to fail")
 	}
 	tc.fakeAtelet.FailRun = nil
 
+	updateActor := proto.CloneOf(baseActor)
+	updateActor.WorkerSelector.MatchLabels["tier"] = "b"
 	if _, err := tc.client.UpdateActor(context.Background(), &ateapipb.UpdateActorRequest{
-		Actor: &ateapipb.Actor{
-			Metadata:       &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: name},
-			WorkerSelector: &ateapipb.Selector{MatchLabels: map[string]string{"tier": "b"}},
-		},
+		Actor:      updateActor,
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"worker_selector"}},
 	}); err != nil {
 		t.Fatalf("UpdateActor failed: %v", err)
 	}
 
-	if _, err := tc.client.ResumeActor(context.Background(), &ateapipb.ResumeActorRequest{Actor: &ateapipb.ObjectRef{Atespace: testAtespace, Name: name}}); err == nil {
+	if _, err := tc.client.ResumeActor(context.Background(), &ateapipb.ResumeActorRequest{Actor: refActor}); err == nil {
 		t.Fatalf("expected second ResumeActor to fail: the assigned worker's pool is no longer eligible")
 	}
 
-	getResp, err := tc.client.GetActor(context.Background(), &ateapipb.GetActorRequest{Actor: &ateapipb.ObjectRef{Atespace: testAtespace, Name: name}})
+	getResp, err := tc.client.GetActor(context.Background(), &ateapipb.GetActorRequest{Actor: refActor})
 	if err != nil {
 		t.Fatalf("GetActor failed: %v", err)
 	}
@@ -2895,14 +2898,17 @@ func TestUpdateActor_ReassignsPoolAcrossSuspendResume(t *testing.T) {
 	createWorkerPod(t, tc, ns, "worker-b", "node1", "pool-b")
 
 	name := "id1"
-	_, err := tc.client.CreateActor(context.Background(), &ateapipb.CreateActorRequest{Actor: &ateapipb.Actor{
-		Metadata:               &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: name},
-		ActorTemplateNamespace: ns,
-		ActorTemplateName:      "tmpl1",
-		WorkerSelector: &ateapipb.Selector{
-			MatchLabels: map[string]string{"tier": "a"},
-		},
-	}})
+	_, err := tc.client.CreateActor(context.Background(), &ateapipb.CreateActorRequest{
+		Actor: validActor(func(a *ateapipb.Actor) {
+			a.Metadata.Atespace = testAtespace
+			a.Metadata.Name = name
+			a.ActorTemplateNamespace = ns
+			a.ActorTemplateName = "tmpl1"
+			a.WorkerSelector = &ateapipb.Selector{
+				MatchLabels: map[string]string{"tier": "a"},
+			}
+		}),
+	})
 	if err != nil {
 		t.Fatalf("CreateActor failed: %v", err)
 	}
@@ -2923,12 +2929,15 @@ func TestUpdateActor_ReassignsPoolAcrossSuspendResume(t *testing.T) {
 	}
 
 	if _, err := tc.client.UpdateActor(context.Background(), &ateapipb.UpdateActorRequest{
-		Actor: &ateapipb.Actor{
-			Metadata: &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: name},
-			WorkerSelector: &ateapipb.Selector{
+		Actor: validActor(func(a *ateapipb.Actor) {
+			a.Metadata.Atespace = testAtespace
+			a.Metadata.Name = name
+			a.ActorTemplateNamespace = ns
+			a.ActorTemplateName = "tmpl1"
+			a.WorkerSelector = &ateapipb.Selector{
 				MatchLabels: map[string]string{"tier": "b"},
-			},
-		},
+			}
+		}),
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"worker_selector"}},
 	}); err != nil {
 		t.Fatalf("UpdateActor failed: %v", err)

@@ -47,11 +47,6 @@ func TestValidateUpdateActorRequest(t *testing.T) {
 	withMaskPaths := func(paths ...string) func(*ateapipb.UpdateActorRequest) {
 		return func(req *ateapipb.UpdateActorRequest) { req.UpdateMask = &fieldmaskpb.FieldMask{Paths: paths} }
 	}
-	withSelector := func(labels map[string]string) func(*ateapipb.UpdateActorRequest) {
-		return func(req *ateapipb.UpdateActorRequest) {
-			req.GetActor().WorkerSelector = &ateapipb.Selector{MatchLabels: labels}
-		}
-	}
 
 	mutableFields := []string{"worker_selector"}
 
@@ -74,7 +69,7 @@ func TestValidateUpdateActorRequest(t *testing.T) {
 	}, {
 		"invalid actor.metadata.atespace",
 		valid(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Atespace = "NS1" })),
-		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "atespace"), "NS1", "")},
+		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "atespace"), "NS1", "").WithOrigin("format=k8s-short-name")},
 	}, {
 		"missing actor.metadata.name",
 		valid(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Name = "" })),
@@ -82,7 +77,7 @@ func TestValidateUpdateActorRequest(t *testing.T) {
 	}, {
 		"invalid actor.metadata.name",
 		valid(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Name = "ID1" })),
-		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "name"), "ID1", "")},
+		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "name"), "ID1", "").WithOrigin("format=k8s-short-name")},
 	}, {
 		"valid actor.metadata.uid precondition",
 		valid(withMetadata(func(m *ateapipb.ResourceMetadata) {
@@ -92,7 +87,7 @@ func TestValidateUpdateActorRequest(t *testing.T) {
 	}, {
 		"invalid actor.metadata.uid precondition",
 		valid(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Uid = "not-a-uuid" })),
-		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "uid"), "not-a-uuid", "")},
+		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "uid"), "not-a-uuid", "").WithOrigin("format=k8s-uuid")},
 	}, {
 		"valid actor.metadata.version precondition",
 		valid(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Version = 7 })),
@@ -100,7 +95,7 @@ func TestValidateUpdateActorRequest(t *testing.T) {
 	}, {
 		"negative actor.metadata.version precondition",
 		valid(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Version = -1 })),
-		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "version"), int64(-1), "")},
+		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "version"), int64(-1), "").WithOrigin("minimum")},
 	}, {
 		"missing update_mask",
 		valid(func(req *ateapipb.UpdateActorRequest) { req.UpdateMask = nil }),
@@ -125,30 +120,10 @@ func TestValidateUpdateActorRequest(t *testing.T) {
 		"nested path in update_mask",
 		valid(withMaskPaths("worker_selector.match_labels")),
 		field.ErrorList{field.NotSupported(field.NewPath("update_mask"), "worker_selector.match_labels", mutableFields)},
-	}, {
-		"nil worker_selector",
-		valid(),
-		nil,
-	}, {
-		"valid worker_selector",
-		valid(withSelector(map[string]string{"tier": "1"})),
-		nil,
-	}, {
-		"invalid worker_selector label key",
-		valid(withSelector(map[string]string{"bad key!": "1"})),
-		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_selector", "match_labels").Key("bad key!"), "bad key!", "")},
-	}, {
-		"invalid worker_selector label value",
-		valid(withSelector(map[string]string{"tier": "not valid!"})),
-		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_selector", "match_labels").Key("tier"), "not valid!", "")},
-	}, {
-		"too many worker_selector.match_labels",
-		valid(withSelector(selectorLabelsOfSize(11))),
-		field.ErrorList{field.TooMany(field.NewPath("actor", "worker_selector", "match_labels"), 11, 10)},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assertValidateErr(t, validateUpdateActorRequest(tt.req), tt.want)
+			assertValidateErr(t, validateUpdateActorRequest(context.Background(), tt.req), tt.want)
 		})
 	}
 }
@@ -157,15 +132,14 @@ func TestValidateUpdateActorRequest(t *testing.T) {
 // while leaving it unset on the request clears it, which is the whole point of
 // requiring an explicit mask.
 func TestUpdateActor_ClearsMaskedField(t *testing.T) {
-	svc, _ := serviceWithActor(t, &ateapipb.Actor{
-		Metadata:               &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: testActorID},
-		ActorTemplateNamespace: "ns1",
-		ActorTemplateName:      "tmpl1",
-		WorkerSelector:         &ateapipb.Selector{MatchLabels: map[string]string{"tier": "free"}},
-	})
+	svc, _ := serviceWithActor(t, validActor(func(a *ateapipb.Actor) {
+		a.WorkerSelector = &ateapipb.Selector{MatchLabels: map[string]string{"tier": "free"}}
+	}))
 
 	updated, err := svc.UpdateActor(context.Background(), &ateapipb.UpdateActorRequest{
-		Actor:      &ateapipb.Actor{Metadata: &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: testActorID}},
+		Actor: validActor(func(a *ateapipb.Actor) {
+			a.WorkerSelector = nil
+		}),
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"worker_selector"}},
 	})
 	if err != nil {
@@ -183,23 +157,25 @@ func TestUpdateActor_StampsFullSpanIdentity(t *testing.T) {
 	createTemplate(t, tc, ns)
 
 	if _, err := tc.service.CreateActor(context.Background(), &ateapipb.CreateActorRequest{
-		Actor: &ateapipb.Actor{
-			Metadata:               &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: testActorID},
-			ActorTemplateNamespace: ns,
-			ActorTemplateName:      "tmpl1",
-		},
+		Actor: validActor(func(a *ateapipb.Actor) {
+			a.Metadata.Atespace = testAtespace
+			a.Metadata.Name = testActorID
+			a.ActorTemplateNamespace = ns
+			a.ActorTemplateName = "tmpl1"
+		}),
 	}); err != nil {
 		t.Fatalf("seed CreateActor: %v", err)
 	}
 
 	attrs := recordRootSpanAttrs(t, func(ctx context.Context) {
 		if _, err := tc.service.UpdateActor(ctx, &ateapipb.UpdateActorRequest{
-			Actor: &ateapipb.Actor{
-				Metadata: &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: testActorID},
-				WorkerSelector: &ateapipb.Selector{
+			Actor: validActor(func(a *ateapipb.Actor) {
+				a.Metadata.Atespace = testAtespace
+				a.Metadata.Name = testActorID
+				a.WorkerSelector = &ateapipb.Selector{
 					MatchLabels: map[string]string{"env": "prod"},
-				},
-			},
+				}
+			}),
 			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"worker_selector"}},
 		}); err != nil {
 			t.Fatalf("UpdateActor: %v", err)
@@ -225,7 +201,10 @@ func TestUpdateActor_FailedLookupStampsRefIdentityOnly(t *testing.T) {
 
 	attrs := recordRootSpanAttrs(t, func(ctx context.Context) {
 		if _, err := tc.service.UpdateActor(ctx, &ateapipb.UpdateActorRequest{
-			Actor:      &ateapipb.Actor{Metadata: &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: testActorID}},
+			Actor: validActor(func(a *ateapipb.Actor) {
+				a.Metadata.Atespace = testAtespace
+				a.Metadata.Name = testActorID
+			}),
 			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"worker_selector"}},
 		}); status.Code(err) != codes.NotFound {
 			t.Fatalf("UpdateActor(missing) error = %v, want code NotFound", err)

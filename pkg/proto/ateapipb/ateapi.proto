@@ -424,7 +424,7 @@ message UpdateActorRequest {
   // actor.metadata.version and actor.metadata.uid are optional preconditions and
   // zero values skip the check.
   //
-  // +k8s:opaqueType
+  // +k8s:required
   Actor actor = 1;
 
   // The set of fields to update. Required.

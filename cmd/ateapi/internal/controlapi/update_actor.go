@@ -34,7 +34,7 @@ var actorMutableFields = mutableFields[*ateapipb.Actor]{
 }
 
 func (s *Service) UpdateActor(ctx context.Context, req *ateapipb.UpdateActorRequest) (*ateapipb.Actor, error) {
-	if errs := validateUpdateActorRequest(req); len(errs) > 0 {
+	if errs := validateUpdateActorRequest(ctx, req); len(errs) > 0 {
 		return nil, toGRPCStatusError(errs)
 	}
 	in := req.GetActor()
@@ -65,23 +65,8 @@ func (s *Service) UpdateActor(ctx context.Context, req *ateapipb.UpdateActorRequ
 	return updated, nil
 }
 
-func validateUpdateActorRequest(req *ateapipb.UpdateActorRequest) field.ErrorList {
-	var fldPath *field.Path
-	var errs field.ErrorList
-
-	actor := req.GetActor()
-	actorPath := fldPath.Child("actor")
-	if actor == nil {
-		return field.ErrorList{field.Required(actorPath, "")}
-	}
-
-	errs = append(errs, resources.ValidateResourceMetadataRef(actor.GetMetadata(), actorPath.Child("metadata"))...)
-
+func validateUpdateActorRequest(ctx context.Context, req *ateapipb.UpdateActorRequest) field.ErrorList {
+	errs := req.Validate(ctx) // TODO: move to caller when all manual validation is removed.
 	errs = append(errs, validateUpdateMask(req.GetUpdateMask(), actorMutableFields)...)
-
-	if selector := actor.GetWorkerSelector(); selector != nil {
-		errs = append(errs, validateSelector(selector, actorPath.Child("worker_selector"))...)
-	}
-
 	return errs
 }

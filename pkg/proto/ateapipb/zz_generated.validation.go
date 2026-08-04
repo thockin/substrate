@@ -685,6 +685,47 @@ func Validate_Selector(
 	return errs
 }
 
+// Validate_UpdateActorRequest validates an instance of UpdateActorRequest according
+// to declarative validation rules in the API schema.
+func Validate_UpdateActorRequest(
+	ctx context.Context, op operation.Operation, fldPath *field.Path,
+	obj, oldObj *UpdateActorRequest) (errs field.ErrorList) {
+
+	{ // field UpdateActorRequest.Actor
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *Actor,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if equality.Semantic.DeepEqual(obj, oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			// call the type's validation function
+			errs = append(errs, Validate_Actor(ctx, op, fldPath, obj, oldObj)...)
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *UpdateActorRequest) *Actor {
+				return oldObj.Actor
+			})
+		errs = append(errs, fn(fldPath.Child("actor"), obj.Actor, oldVal, oldObj != nil)...)
+	}
+
+	// field UpdateActorRequest.UpdateMask has no validation
+	return errs
+}
+
 // Validate_WorkerAssignment validates an instance of WorkerAssignment according
 // to declarative validation rules in the API schema.
 func Validate_WorkerAssignment(

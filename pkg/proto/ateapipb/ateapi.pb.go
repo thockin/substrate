@@ -1671,7 +1671,7 @@ type UpdateActorRequest struct {
 	// actor.metadata.version and actor.metadata.uid are optional preconditions and
 	// zero values skip the check.
 	//
-	// +k8s:opaqueType
+	// +k8s:required
 	Actor *Actor `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
 	// The set of fields to update. Required.
 	//

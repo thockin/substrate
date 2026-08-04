@@ -30,6 +30,7 @@ import (
 // rules for a resource name, which is a subset of the rules for an RFC-1123
 // DNS label.  This does not check for zero-length strings, which callers may
 // want to handle differently (e.g., by returning a "required" error).
+// TODO: remove this when DV is fully in
 func ValidateResourceName(name string, fldPath *field.Path) field.ErrorList {
 	var errs field.ErrorList
 	for _, msg := range content.IsDNS1123Label(name) {
@@ -43,12 +44,14 @@ func ValidateResourceName(name string, fldPath *field.Path) field.ErrorList {
 // internal, non-proto checks where a plain predicate is wanted; to validate a
 // proto request field with structured field-path errors, use
 // ValidateResourceName. Empty is not a valid name.
+// TODO: remove this when DV is fully in
 func IsValidResourceName(name string) bool {
 	return len(content.IsDNS1123Label(name)) == 0
 }
 
 // ValidateObjectRef checks that the object reference is well-formed and that
 // each of its components is a valid resource name.
+// TODO: remove this when DV is fully in
 func ValidateObjectRef(ref *ateapipb.ObjectRef, fldPath *field.Path) field.ErrorList {
 	if ref == nil {
 		return nil
@@ -335,6 +338,8 @@ func ValidateIP(ip string, fldPath *field.Path) field.ErrorList {
 //   - must be 36 characters long
 //   - must be in the normalized form `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 //   - must use only lowercase hexadecimal characters
+//
+// TODO: remove this when DV is fully in
 func ValidateUUID(uuid string, fldPath *field.Path) field.ErrorList {
 	const uuidErrorMessage = "must be a lowercase UUID in 8-4-4-4-12 format"
 
