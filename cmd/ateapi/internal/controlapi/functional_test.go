@@ -3570,5 +3570,5 @@ func TestDeleteAtespace_NotFound(t *testing.T) {
 
 func assertValidateErr(t *testing.T, got field.ErrorList, want field.ErrorList) {
 	t.Helper()
-	field.ErrorMatcher{}.ByType().ByField().ByOrigin().Test(t, want, got)
+	field.ErrorMatcher{}.ByType().ByField().ByOrigin().ByDetailSubstring().Test(t, want, got)
 }

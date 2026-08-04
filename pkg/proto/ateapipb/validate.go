@@ -18,6 +18,7 @@ import (
 	"context"
 
 	operation "k8s.io/apimachinery/pkg/api/operation"
+	"k8s.io/apimachinery/pkg/util/validation"
 	field "k8s.io/apimachinery/pkg/util/validation/field"
 )
 
@@ -29,4 +30,11 @@ func (x *CreateAtespaceRequest) Validate(ctx context.Context) field.ErrorList {
 func (x *CreateActorRequest) Validate(ctx context.Context) field.ErrorList {
 	op := operation.Operation{Type: operation.Create}
 	return Validate_CreateActorRequest(ctx, op, nil, x, nil)
+}
+
+func ValidateCustom_WorkerAssignment_WorkerPodIp(_ context.Context, _ operation.Operation, fldPath *field.Path, value, _ *string) field.ErrorList {
+	if value == nil {
+		return nil
+	}
+	return validation.IsValidIP(fldPath, *value)
 }

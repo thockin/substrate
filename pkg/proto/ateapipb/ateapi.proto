@@ -273,6 +273,9 @@ message WorkerAssignment {
   string worker_pod_uid = 4;
 
   // worker_pod_ip is the IP of worker_pod.
+  //
+  // +k8s:required
+  // +k8s:customValidation # until format=k8s-ip is supported
   string worker_pod_ip = 5;
 }
 

@@ -155,6 +155,14 @@ func TestValidateCreateActorRequest(t *testing.T) {
 		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment = nil }),
 		nil,
 	}, {
+		"valid actor.worker_assignmentat.worker_pod_ip IPv4",
+		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodIp = "1.2.3.4" }),
+		nil,
+	}, {
+		"valid actor.worker_assignmentat.worker_pod_ip IPv6",
+		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodIp = "1234::5678" }),
+		nil,
+	}, {
 		"unspecified actor.worker_assignment.worker_namespace",
 		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerNamespace = "" }),
 		field.ErrorList{field.Required(field.NewPath("actor", "worker_assignment", "worker_namespace"), "")},
@@ -178,6 +186,14 @@ func TestValidateCreateActorRequest(t *testing.T) {
 		"invalid actor.worker_assignment.worker_pod",
 		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPod = "invalid value" }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_assignment", "worker_pod"), nil, "").WithOrigin("format=k8s-long-name")},
+	}, {
+		"unspecified actor.worker_assignment.worker_pod_ip",
+		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodIp = "" }),
+		field.ErrorList{field.Required(field.NewPath("actor", "worker_assignment", "worker_pod_ip"), "")},
+	}, {
+		"invalid actor.worker_assignment.worker_pod_ip",
+		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodIp = "invalid value" }),
+		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_assignment", "worker_pod_ip"), nil, "").WithOrigin("format=ip-strict")},
 	}, {
 		"worker_selector with nil match_labels",
 		validActor(func(a *ateapipb.Actor) { a.WorkerSelector = &ateapipb.Selector{} }),
