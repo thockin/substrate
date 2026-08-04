@@ -754,6 +754,7 @@ func (s *Persistence) DeleteActor(ctx context.Context, actorRef resources.ActorR
 	return deleted, nil
 }
 
+<<<<<<< HEAD
 // validateUpdateActorMutation reports whether an actor mutation left the fields it does
 // not own alone.
 func validateUpdateActorMutation(storedActor, mutatedActor *ateapipb.Actor) error {
@@ -775,6 +776,17 @@ func validateUpdateActorMutation(storedActor, mutatedActor *ateapipb.Actor) erro
 // updateActorMaxAttempts bounds how many times UpdateActor re-runs its
 // read-modify-write after a concurrent writer invalidates the transaction.
 const updateActorMaxAttempts = 5
+||||||| parent of e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
+func (s *Persistence) UpdateActor(ctx context.Context, actor *ateapipb.Actor, expectedVersion int64) (*ateapipb.Actor, error) {
+	dbKey := actorDBKey(resources.ActorRefFromActor(actor))
+
+	// Clone because we will update the version field, and we don't want to
+	// stomp the caller's copy.
+	dbActor := proto.Clone(actor).(*ateapipb.Actor)
+=======
+func (s *Persistence) UpdateActor(ctx context.Context, newActor *ateapipb.Actor, expectedVersion int64) (*ateapipb.Actor, error) {
+	dbKey := actorDBKey(resources.ActorRefFromActor(newActor))
+>>>>>>> e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
 
 func (s *Persistence) UpdateActor(ctx context.Context, actorRef resources.ActorRef, mutate func(*ateapipb.Actor) error) (*ateapipb.Actor, error) {
 	dbKey := actorDBKey(actorRef)
@@ -796,6 +808,7 @@ func (s *Persistence) UpdateActor(ctx context.Context, actorRef resources.ActorR
 				return fmt.Errorf("in protojson.Unmarshal: %w", err)
 			}
 
+<<<<<<< HEAD
 			// Snapshot the stored state before handing the actor to mutate.
 			// mutate is free to edit anything it is given.
 			actorBeforeMutation := proto.Clone(currentActor).(*ateapipb.Actor)
@@ -810,11 +823,58 @@ func (s *Persistence) UpdateActor(ctx context.Context, actorRef resources.ActorR
 			// The stored metadata is authoritative; derive the next metadata
 			// from it, discarding whatever mutate made of it.
 			currentActor.Metadata = newUpdateMetadata(actorBeforeMutation.GetMetadata())
+||||||| parent of e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
+		if currentActor.GetMetadata().GetVersion() != expectedVersion {
+			return store.ErrVersionConflict
+		}
+		if currentActor.GetMetadata().GetName() != dbActor.GetMetadata().GetName() {
+			return fmt.Errorf("name is immutable")
+		}
+		if currentActor.GetMetadata().GetAtespace() != dbActor.GetMetadata().GetAtespace() {
+			return fmt.Errorf("atespace is immutable")
+		}
+		if currentActor.GetActorTemplateNamespace() != dbActor.GetActorTemplateNamespace() {
+			return fmt.Errorf("actor_template_namespace is immutable")
+		}
+		if currentActor.GetActorTemplateName() != dbActor.GetActorTemplateName() {
+			return fmt.Errorf("actor_template_name is immutable")
+		}
+		// The stored metadata is authoritative; derive the next metadata from it.
+		dbActor.Metadata = newUpdateMetadata(currentActor.GetMetadata())
+=======
+		if currentActor.GetMetadata().GetVersion() != expectedVersion {
+			return store.ErrVersionConflict
+		}
+		if currentActor.GetMetadata().GetName() != newActor.GetMetadata().GetName() {
+			return fmt.Errorf("name is immutable")
+		}
+		if currentActor.GetMetadata().GetAtespace() != newActor.GetMetadata().GetAtespace() {
+			return fmt.Errorf("atespace is immutable")
+		}
+		if currentActor.GetActorTemplateNamespace() != newActor.GetActorTemplateNamespace() {
+			return fmt.Errorf("actor_template_namespace is immutable")
+		}
+		if currentActor.GetActorTemplateName() != newActor.GetActorTemplateName() {
+			return fmt.Errorf("actor_template_name is immutable")
+		}
+>>>>>>> e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
 
+<<<<<<< HEAD
 			newVal, err := protojson.Marshal(currentActor)
 			if err != nil {
 				return fmt.Errorf("in protojson.Marshal: %w", err)
 			}
+||||||| parent of e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
+		newVal, err := protojson.Marshal(dbActor)
+		if err != nil {
+			return fmt.Errorf("in protojson.Marshal: %w", err)
+		}
+=======
+		newVal, err := protojson.Marshal(newActor)
+		if err != nil {
+			return fmt.Errorf("in protojson.Marshal: %w", err)
+		}
+>>>>>>> e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
 
 			if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 				pipe.Set(ctx, dbKey, newVal, 0)
@@ -842,9 +902,17 @@ func (s *Persistence) UpdateActor(ctx context.Context, actorRef resources.ActorR
 		}
 	}
 
+<<<<<<< HEAD
 	// Only the TxFailedErr branch continues the loop, so getting here means every
 	// attempt lost the race.
 	return nil, store.ErrVersionConflict
+||||||| parent of e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
+	// dbActor is the persisted state (advanced version and update_time). The
+	// caller's input is left unmodified.
+	return dbActor, nil
+=======
+	return newActor, nil
+>>>>>>> e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
 }
 
 func (s *Persistence) ListWorkers(ctx context.Context, pageSize int32, pageTokenStr string) ([]*ateapipb.Worker, string, error) {

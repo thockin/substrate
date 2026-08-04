@@ -175,8 +175,8 @@ func TestUpdateActor_Success(t *testing.T) {
 	if updated.GetStatus() != ateapipb.Actor_STATUS_RUNNING {
 		t.Errorf("UpdateActor returned status %v, want RUNNING", updated.GetStatus())
 	}
-	if updated.GetMetadata().GetVersion() != 2 {
-		t.Errorf("UpdateActor returned version %d, want 2", updated.GetMetadata().GetVersion())
+	if updated.GetMetadata().GetVersion() != created.GetMetadata().GetVersion() {
+		t.Errorf("UpdateActor returned version %d, want 1", updated.GetMetadata().GetVersion())
 	}
 	if updated.GetMetadata().GetUid() != created.GetMetadata().GetUid() {
 		t.Errorf("uid changed on update: got %q, want %q", updated.GetMetadata().GetUid(), created.GetMetadata().GetUid())
@@ -197,11 +197,34 @@ func TestUpdateActor_Success(t *testing.T) {
 
 func TestUpdateActor_MutateErrorAreNotRetried(t *testing.T) {
 	_, s, ctx := setupTest(t)
+<<<<<<< HEAD
 	actor := newTestActor("actor-1")
 	created, err := s.CreateActor(ctx, actor)
+||||||| parent of e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
+
+	actor := &ateapipb.Actor{
+		Metadata:               &ateapipb.ResourceMetadata{Name: "actor-1", Atespace: testAtespace},
+		ActorTemplateNamespace: "default",
+		ActorTemplateName:      "test-template",
+		Status:                 ateapipb.Actor_STATUS_SUSPENDED,
+	}
+
+	_, err := s.CreateActor(ctx, actor)
+=======
+
+	actor := &ateapipb.Actor{
+		Metadata:               &ateapipb.ResourceMetadata{Name: "actor-1", Atespace: testAtespace},
+		ActorTemplateNamespace: "default",
+		ActorTemplateName:      "test-template",
+		Status:                 ateapipb.Actor_STATUS_SUSPENDED,
+	}
+
+	actor1, err := s.CreateActor(ctx, actor)
+>>>>>>> e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
 	if err != nil {
 		t.Fatalf("CreateActor failed: %v", err)
 	}
+<<<<<<< HEAD
 
 	var mutationError = errors.New("mutation error")
 
@@ -238,7 +261,24 @@ func TestUpdateActor_DiscardsServerOwnedFieldsEdits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateActor failed: %v", err)
 	}
+||||||| parent of e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
 
+	// Fetch instance 1
+	actor1, err := s.GetActor(ctx, resources.ActorRefFromActor(actor))
+	if err != nil {
+		t.Fatalf("GetActor failed: %v", err)
+	}
+
+	// Fetch instance 2 (stale after actor1 updates)
+	actor2, err := s.GetActor(ctx, resources.ActorRefFromActor(actor))
+	if err != nil {
+		t.Fatalf("GetActor failed: %v", err)
+	}
+=======
+	actor2 := proto.CloneOf(actor1)
+>>>>>>> e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
+
+<<<<<<< HEAD
 	actorRef := resources.ActorRefFromActor(actor)
 	updated, err := s.UpdateActor(ctx, actorRef, func(dbActor *ateapipb.Actor) error {
 		// Metadata is server-owned: a closure must not be able to change it.
@@ -249,6 +289,17 @@ func TestUpdateActor_DiscardsServerOwnedFieldsEdits(t *testing.T) {
 		dbActor.Status = ateapipb.Actor_STATUS_RUNNING
 		return nil
 	})
+||||||| parent of e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
+	// Update instance 1
+	actor1.Status = ateapipb.Actor_STATUS_RUNNING
+	_, err = s.UpdateActor(ctx, actor1, actor1.GetMetadata().GetVersion())
+=======
+	// Update instance 1
+	actor1.Status = ateapipb.Actor_STATUS_RUNNING
+	prevVer := actor1.GetMetadata().GetVersion()
+	actor1.Metadata.Version++ // usually handled in the RPC method
+	_, err = s.UpdateActor(ctx, actor1, prevVer)
+>>>>>>> e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
 	if err != nil {
 		t.Fatalf("UpdateActor failed: %v", err)
 	}

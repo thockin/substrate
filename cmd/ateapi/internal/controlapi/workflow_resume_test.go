@@ -384,6 +384,7 @@ func TestAssignWorkerAttempt_ConflictRefreshesActor(t *testing.T) {
 					t.Errorf("inject GetActor: %v", err)
 					return
 				}
+<<<<<<< HEAD
 				injected, err = persistence.UpdateActor(ctx, resources.ActorRef{Atespace: "team-a", Name: "id1"}, func(dbActor *ateapipb.Actor) error {
 					if err := store.CheckActorPrecondition(dbActor, store.AnyUID, fresh.GetMetadata().GetVersion()); err != nil {
 						return err
@@ -391,6 +392,15 @@ func TestAssignWorkerAttempt_ConflictRefreshesActor(t *testing.T) {
 					tc.mutate(dbActor)
 					return nil
 				})
+||||||| parent of e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
+				tc.mutate(fresh)
+				injected, err = persistence.UpdateActor(ctx, fresh, fresh.GetMetadata().GetVersion())
+=======
+				tc.mutate(fresh)
+				prevVer := fresh.Metadata.Version
+				fresh.Metadata.Version++ // usually handled by the RPC layer
+				injected, err = persistence.UpdateActor(ctx, fresh, prevVer)
+>>>>>>> e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
 				if err != nil {
 					t.Errorf("inject UpdateActor: %v", err)
 				}

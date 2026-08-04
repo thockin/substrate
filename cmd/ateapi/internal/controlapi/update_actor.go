@@ -46,9 +46,46 @@ func (s *Service) UpdateActor(ctx context.Context, req *ateapipb.UpdateActorRequ
 		if err := store.CheckActorPrecondition(dbActor, in.GetMetadata().GetUid(), in.GetMetadata().GetVersion()); err != nil {
 			return err
 		}
+<<<<<<< HEAD
 		applyUpdateMask(dbActor, in, req.GetUpdateMask(), actorMutableFields)
 		return nil
 	})
+||||||| parent of e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
+		return nil, fmt.Errorf("while getting actor: %w", err)
+	}
+
+	// UID and version preconditions
+	if uid := in.GetMetadata().GetUid(); uid != "" && uid != actor.GetMetadata().GetUid() {
+		return nil, status.Errorf(codes.Aborted, "Actor %s has uid %s, not %s", actorRef, actor.GetMetadata().GetUid(), uid)
+	}
+
+	expectedVersion := actor.GetMetadata().GetVersion()
+	if version := in.GetMetadata().GetVersion(); version != 0 {
+		expectedVersion = version
+	}
+
+	applyUpdateMask(actor, in, req.GetUpdateMask(), actorMutableFields)
+
+	updated, err := s.persistence.UpdateActor(ctx, actor, expectedVersion)
+=======
+		return nil, fmt.Errorf("while getting actor: %w", err)
+	}
+
+	// UID and version preconditions
+	if uid := in.GetMetadata().GetUid(); uid != "" && uid != actor.GetMetadata().GetUid() {
+		return nil, status.Errorf(codes.Aborted, "Actor %s has uid %s, not %s", actorRef, actor.GetMetadata().GetUid(), uid)
+	}
+
+	expectedVersion := actor.GetMetadata().GetVersion()
+	if version := in.GetMetadata().GetVersion(); version != 0 {
+		expectedVersion = version
+	}
+	actor.Metadata = newMetadataForUpdate(actor.GetMetadata())
+
+	applyUpdateMask(actor, in, req.GetUpdateMask(), actorMutableFields)
+
+	updated, err := s.persistence.UpdateActor(ctx, actor, expectedVersion)
+>>>>>>> e9f9c4fe (Prefactor: UpdateActor() - set metadata in RPC layer)
 	if err != nil {
 		if errors.Is(err, store.ErrVersionConflict) {
 			return nil, status.Error(codes.Aborted, "concurrent update conflict, please retry")
