@@ -705,13 +705,17 @@ type Actor struct {
 	// +k8s:optional
 	WorkerSelector *Selector `protobuf:"bytes,7,opt,name=worker_selector,json=workerSelector,proto3" json:"worker_selector,omitempty"`
 	// The latest durable snapshot created for this Actor.
+	// TODO: validation
 	LatestSnapshot *ObjectRef `protobuf:"bytes,8,opt,name=latest_snapshot,json=latestSnapshot,proto3" json:"latest_snapshot,omitempty"`
 	// Node-local state used only while the Actor is paused.
+	// TODO: validation
 	LocalSnapshotInfo *LocalSnapshotInfo `protobuf:"bytes,9,opt,name=local_snapshot_info,json=localSnapshotInfo,proto3" json:"local_snapshot_info,omitempty"`
 	// Actor version captured when the current durable snapshot began.
+	// TODO: validation
 	InProgressSnapshotSourceActorVersion int64 `protobuf:"varint,10,opt,name=in_progress_snapshot_source_actor_version,json=inProgressSnapshotSourceActorVersion,proto3" json:"in_progress_snapshot_source_actor_version,omitempty"`
 	// Volumes attached to the actor. These volumes only live as long as the actor.
 	// They are deleted when the actor is deleted.
+	// TODO: validation
 	ActorVolumes                []*ExternalVolume `protobuf:"bytes,11,rep,name=actor_volumes,json=actorVolumes,proto3" json:"actor_volumes,omitempty"`
 	InProgressLocalSnapshotName string            `protobuf:"bytes,12,opt,name=in_progress_local_snapshot_name,json=inProgressLocalSnapshotName,proto3" json:"in_progress_local_snapshot_name,omitempty"`
 	unknownFields               protoimpl.UnknownFields
@@ -1589,6 +1593,7 @@ type CreateActorRequest struct {
 	// +k8s:required
 	Actor *Actor `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
 	// Optional durable snapshot used to initialize the Actor.
+	// TODO: validation
 	SourceSnapshot *ActorSnapshotRef `protobuf:"bytes,2,opt,name=source_snapshot,json=sourceSnapshot,proto3" json:"source_snapshot,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache

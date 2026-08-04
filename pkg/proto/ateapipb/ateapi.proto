@@ -244,16 +244,20 @@ message Actor {
   Selector worker_selector = 7;
 
   // The latest durable snapshot created for this Actor.
+  // TODO: validation
   ObjectRef latest_snapshot = 8;
 
   // Node-local state used only while the Actor is paused.
+  // TODO: validation
   LocalSnapshotInfo local_snapshot_info = 9;
 
   // Actor version captured when the current durable snapshot began.
+  // TODO: validation
   int64 in_progress_snapshot_source_actor_version = 10;
 
   // Volumes attached to the actor. These volumes only live as long as the actor.
   // They are deleted when the actor is deleted.
+  // TODO: validation
   repeated ExternalVolume actor_volumes = 11;
 
   string in_progress_local_snapshot_name = 12;
@@ -388,6 +392,7 @@ message CreateActorRequest {
   Actor actor = 1;
 
   // Optional durable snapshot used to initialize the Actor.
+  // TODO: validation
   ActorSnapshotRef source_snapshot = 2;
 }
 
