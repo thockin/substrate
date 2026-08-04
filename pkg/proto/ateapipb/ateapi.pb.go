@@ -706,6 +706,7 @@ type Actor struct {
 	WorkerSelector *Selector `protobuf:"bytes,7,opt,name=worker_selector,json=workerSelector,proto3" json:"worker_selector,omitempty"`
 	// The latest durable snapshot created for this Actor.
 	// TODO: validation
+	// +k8s:opaqueType
 	LatestSnapshot *ObjectRef `protobuf:"bytes,8,opt,name=latest_snapshot,json=latestSnapshot,proto3" json:"latest_snapshot,omitempty"`
 	// Node-local state used only while the Actor is paused.
 	// TODO: validation
@@ -937,7 +938,8 @@ func (x *WorkerAssignment) GetWorkerPodIp() string {
 type ActorSnapshot struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// +k8s:opaqueType
-	Metadata               *ResourceMetadata    `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	Metadata *ResourceMetadata `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	// +k8s:opaqueType
 	SourceActor            *ObjectRef           `protobuf:"bytes,2,opt,name=source_actor,json=sourceActor,proto3" json:"source_actor,omitempty"`
 	SourceActorUid         string               `protobuf:"bytes,3,opt,name=source_actor_uid,json=sourceActorUid,proto3" json:"source_actor_uid,omitempty"`
 	SourceActorVersion     int64                `protobuf:"varint,4,opt,name=source_actor_version,json=sourceActorVersion,proto3" json:"source_actor_version,omitempty"`
@@ -1048,7 +1050,8 @@ func (x *ActorSnapshot) GetSnapshotUri() string {
 type ActorSnapshotTag struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// +k8s:opaqueType
-	Metadata      *ResourceMetadata     `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	Metadata *ResourceMetadata `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	// +k8s:opaqueType
 	Snapshot      *ObjectRef            `protobuf:"bytes,2,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	Scope         ActorSnapshotTagScope `protobuf:"varint,3,opt,name=scope,proto3,enum=ateapi.ActorSnapshotTagScope" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1160,9 +1163,18 @@ func (x *Atespace) GetMetadata() *ResourceMetadata {
 type ObjectRef struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The atespace where the resource lives. Empty if the resource is global-scoped.
+	//
+	// References to atespaced resources should add +k8s:subfield(atespace)=+k8s:required
+	// References to non-atespaced resources should add +k8s:subfield(atespace)=+k8s:forbidden
+	//
+	// +k8s:optional
+	// +k8s:format=k8s-short-name
 	Atespace string `protobuf:"bytes,1,opt,name=atespace,proto3" json:"atespace,omitempty"`
 	// The name of the resource. Required. Unique within an atespace, or globally
 	// unique if the resource is global-scoped.
+	//
+	// +k8s:required
+	// +k8s:format=k8s-short-name
 	Name          string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1285,10 +1297,12 @@ type isActorSnapshotRef_Reference interface {
 }
 
 type ActorSnapshotRef_Snapshot struct {
+	// +k8s:opaqueType
 	Snapshot *ObjectRef `protobuf:"bytes,1,opt,name=snapshot,proto3,oneof"`
 }
 
 type ActorSnapshotRef_Tag struct {
+	// +k8s:opaqueType
 	Tag *ObjectRef `protobuf:"bytes,2,opt,name=tag,proto3,oneof"`
 }
 
@@ -1344,8 +1358,9 @@ func (x *CreateAtespaceRequest) GetAtespace() *Atespace {
 }
 
 type GetAtespaceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Atespace      *ObjectRef             `protobuf:"bytes,1,opt,name=atespace,proto3" json:"atespace,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// +k8s:opaqueType
+	Atespace      *ObjectRef `protobuf:"bytes,1,opt,name=atespace,proto3" json:"atespace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1499,8 +1514,9 @@ func (x *ListAtespacesResponse) GetNextPageToken() string {
 }
 
 type DeleteAtespaceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Atespace      *ObjectRef             `protobuf:"bytes,1,opt,name=atespace,proto3" json:"atespace,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// +k8s:opaqueType
+	Atespace      *ObjectRef `protobuf:"bytes,1,opt,name=atespace,proto3" json:"atespace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1543,8 +1559,9 @@ func (x *DeleteAtespaceRequest) GetAtespace() *ObjectRef {
 }
 
 type GetActorRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Actor         *ObjectRef             `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// +k8s:opaqueType
+	Actor         *ObjectRef `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1710,8 +1727,9 @@ func (x *UpdateActorRequest) GetUpdateMask() *fieldmaskpb.FieldMask {
 }
 
 type SuspendActorRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Actor         *ObjectRef             `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// +k8s:opaqueType
+	Actor         *ObjectRef `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1798,8 +1816,9 @@ func (x *SuspendActorResponse) GetActor() *Actor {
 }
 
 type PauseActorRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Actor         *ObjectRef             `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// +k8s:opaqueType
+	Actor         *ObjectRef `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1887,7 +1906,8 @@ func (x *PauseActorResponse) GetActor() *Actor {
 
 type ResumeActorRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Actor *ObjectRef             `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
+	// +k8s:opaqueType
+	Actor *ObjectRef `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
 	// If true, skip golden snapshot and boot the workload from scratch.
 	Boot          bool `protobuf:"varint,2,opt,name=boot,proto3" json:"boot,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1993,8 +2013,9 @@ func (x *ResumeActorResponse) GetResumed() bool {
 }
 
 type DeleteActorRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Actor         *ObjectRef             `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// +k8s:opaqueType
+	Actor         *ObjectRef `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2308,8 +2329,9 @@ func (x *UpdateActorSnapshotTagRequest) GetUpdateMask() *fieldmaskpb.FieldMask {
 }
 
 type DeleteActorSnapshotTagRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Tag           *ObjectRef             `protobuf:"bytes,1,opt,name=tag,proto3" json:"tag,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// +k8s:opaqueType
+	Tag           *ObjectRef `protobuf:"bytes,1,opt,name=tag,proto3" json:"tag,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2711,8 +2733,9 @@ func (x *Worker) GetState() Worker_State {
 type Assignment struct {
 	state         protoimpl.MessageState   `protogen:"open.v1"`
 	ActorTemplate *KubeNamespacedObjectRef `protobuf:"bytes,1,opt,name=actor_template,json=actorTemplate,proto3" json:"actor_template,omitempty"`
-	Actor         *ObjectRef               `protobuf:"bytes,2,opt,name=actor,proto3" json:"actor,omitempty"`
-	ActorUid      string                   `protobuf:"bytes,3,opt,name=actor_uid,json=actorUid,proto3" json:"actor_uid,omitempty"`
+	// +k8s:opaqueType
+	Actor         *ObjectRef `protobuf:"bytes,2,opt,name=actor,proto3" json:"actor,omitempty"`
+	ActorUid      string     `protobuf:"bytes,3,opt,name=actor_uid,json=actorUid,proto3" json:"actor_uid,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

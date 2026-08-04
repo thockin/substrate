@@ -245,6 +245,7 @@ message Actor {
 
   // The latest durable snapshot created for this Actor.
   // TODO: validation
+  // +k8s:opaqueType
   ObjectRef latest_snapshot = 8;
 
   // Node-local state used only while the Actor is paused.
@@ -300,6 +301,7 @@ message WorkerAssignment {
 message ActorSnapshot {
   // +k8s:opaqueType
   ResourceMetadata metadata = 1;
+  // +k8s:opaqueType
   ObjectRef source_actor = 2;
   string source_actor_uid = 3;
   int64 source_actor_version = 4;
@@ -315,6 +317,7 @@ message ActorSnapshot {
 message ActorSnapshotTag {
   // +k8s:opaqueType
   ResourceMetadata metadata = 1;
+  // +k8s:opaqueType
   ObjectRef snapshot = 2;
   ActorSnapshotTagScope scope = 3;
 }
@@ -332,9 +335,19 @@ message Atespace {
 // ObjectRef references a Substrate resource by its (atespace, name) identity.
 message ObjectRef {
   // The atespace where the resource lives. Empty if the resource is global-scoped.
+  //
+  // References to atespaced resources should add +k8s:subfield(atespace)=+k8s:required
+  // References to non-atespaced resources should add +k8s:subfield(atespace)=+k8s:forbidden
+  //
+  // +k8s:optional
+  // +k8s:format=k8s-short-name
   string atespace = 1;
+
   // The name of the resource. Required. Unique within an atespace, or globally
   // unique if the resource is global-scoped.
+  //
+  // +k8s:required
+  // +k8s:format=k8s-short-name
   string name = 2;
 }
 
@@ -342,7 +355,9 @@ message ObjectRef {
 // Atespace-owned tag. Tag addresses remain stable when tags are published.
 message ActorSnapshotRef {
   oneof reference {
+    // +k8s:opaqueType
     ObjectRef snapshot = 1;
+    // +k8s:opaqueType
     ObjectRef tag = 2;
   }
 }
@@ -355,6 +370,7 @@ message CreateAtespaceRequest {
 }
 
 message GetAtespaceRequest {
+  // +k8s:opaqueType
   ObjectRef atespace = 1;
 }
 
@@ -378,10 +394,12 @@ message ListAtespacesResponse {
 }
 
 message DeleteAtespaceRequest {
+  // +k8s:opaqueType
   ObjectRef atespace = 1;
 }
 
 message GetActorRequest {
+  // +k8s:opaqueType
   ObjectRef actor = 1;
 }
 
@@ -417,6 +435,7 @@ message UpdateActorRequest {
 }
 
 message SuspendActorRequest {
+  // +k8s:opaqueType
   ObjectRef actor = 1;
 }
 
@@ -425,6 +444,7 @@ message SuspendActorResponse {
 }
 
 message PauseActorRequest {
+  // +k8s:opaqueType
   ObjectRef actor = 1;
 }
 
@@ -433,6 +453,7 @@ message PauseActorResponse {
 }
 
 message ResumeActorRequest {
+  // +k8s:opaqueType
   ObjectRef actor = 1;
 
   // If true, skip golden snapshot and boot the workload from scratch.
@@ -448,6 +469,7 @@ message ResumeActorResponse {
 }
 
 message DeleteActorRequest {
+  // +k8s:opaqueType
   ObjectRef actor = 1;
 }
 
@@ -489,6 +511,7 @@ message UpdateActorSnapshotTagRequest {
 }
 
 message DeleteActorSnapshotTagRequest {
+  // +k8s:opaqueType
   ObjectRef tag = 1;
 }
 
@@ -558,6 +581,7 @@ message Worker {
 
 message Assignment {
   KubeNamespacedObjectRef actor_template = 1;
+  // +k8s:opaqueType
   ObjectRef actor = 2;
   string actor_uid = 3;
 }
