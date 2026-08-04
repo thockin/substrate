@@ -841,6 +841,9 @@ type WorkerAssignment struct {
 	// +k8s:format=k8s-long-name
 	WorkerPod string `protobuf:"bytes,3,opt,name=worker_pod,json=workerPod,proto3" json:"worker_pod,omitempty"`
 	// worker_pod_uid is the Kubernetes UID of worker_pod.
+	//
+	// +k8s:required
+	// +k8s:format=k8s-uuid
 	WorkerPodUid string `protobuf:"bytes,4,opt,name=worker_pod_uid,json=workerPodUid,proto3" json:"worker_pod_uid,omitempty"`
 	// worker_pod_ip is the IP of worker_pod.
 	//

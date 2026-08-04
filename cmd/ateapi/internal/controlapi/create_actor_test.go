@@ -187,6 +187,14 @@ func TestValidateCreateActorRequest(t *testing.T) {
 		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPod = "invalid value" }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_assignment", "worker_pod"), nil, "").WithOrigin("format=k8s-long-name")},
 	}, {
+		"unspecified actor.worker_assignment.worker_pod_uid",
+		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodUid = "" }),
+		field.ErrorList{field.Required(field.NewPath("actor", "worker_assignment", "worker_pod_uid"), "")},
+	}, {
+		"invalid actor.worker_assignment.worker_pod_uid",
+		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodUid = "invalid value" }),
+		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_assignment", "worker_pod_uid"), nil, "").WithOrigin("format=k8s-uuid")},
+	}, {
 		"unspecified actor.worker_assignment.worker_pod_ip",
 		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodIp = "" }),
 		field.ErrorList{field.Required(field.NewPath("actor", "worker_assignment", "worker_pod_ip"), "")},
