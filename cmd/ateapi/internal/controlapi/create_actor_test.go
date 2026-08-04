@@ -16,6 +16,8 @@ package controlapi
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -67,8 +69,19 @@ func TestCreateActor_StampsFullSpanIdentity(t *testing.T) {
 	}
 }
 
+func line() string {
+	_, _, line, ok := runtime.Caller(1)
+	var s string
+	if ok {
+		s = fmt.Sprintf("%d", line)
+	} else {
+		s = "<??>"
+	}
+	return s
+}
+
 func TestValidateCreateActorRequest(t *testing.T) {
-	validActor := func(mutate func(*ateapipb.Actor)) *ateapipb.CreateActorRequest {
+	valid := func(mutate func(*ateapipb.Actor)) *ateapipb.CreateActorRequest {
 		a := &ateapipb.Actor{
 			Metadata:               &ateapipb.ResourceMetadata{Atespace: "my-atespace", Name: "my-name"},
 			ActorTemplateNamespace: "actor-template-ns",
@@ -89,169 +102,208 @@ func TestValidateCreateActorRequest(t *testing.T) {
 
 	tests := []struct {
 		name string
+		line string
 		req  *ateapipb.CreateActorRequest
 		want field.ErrorList
 	}{{
 		"valid",
-		validActor(nil),
+		line(),
+		valid(nil),
 		nil,
 	}, {
 		"missing actor",
+		line(),
 		&ateapipb.CreateActorRequest{},
 		field.ErrorList{field.Required(field.NewPath("actor"), "")},
 	}, {
 		"missing actor.metadata",
-		validActor(func(a *ateapipb.Actor) { a.Metadata = nil }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.Metadata = nil }),
 		field.ErrorList{field.Required(field.NewPath("actor", "metadata"), "")},
 	}, {
 		"missing actor.metadata.atespace",
-		validActor(func(a *ateapipb.Actor) { a.Metadata.Atespace = "" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.Metadata.Atespace = "" }),
 		field.ErrorList{field.Required(field.NewPath("actor", "metadata", "atespace"), "")},
 	}, {
 		"invalid actor.metadata.atespace",
-		validActor(func(a *ateapipb.Actor) { a.Metadata.Atespace = "NS1" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.Metadata.Atespace = "NS1" }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "atespace"), nil, "").WithOrigin("format=k8s-short-name")},
 	}, {
 		"missing actor.metadata.name",
-		validActor(func(a *ateapipb.Actor) { a.Metadata.Name = "" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.Metadata.Name = "" }),
 		field.ErrorList{field.Required(field.NewPath("actor", "metadata", "name"), "")},
 	}, {
 		"invalid actor.metadata.name",
-		validActor(func(a *ateapipb.Actor) { a.Metadata.Name = "ID1" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.Metadata.Name = "ID1" }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "name"), nil, "").WithOrigin("format=k8s-short-name")},
 	}, {
 		"missing actor.actor_template_namespace",
-		validActor(func(a *ateapipb.Actor) { a.ActorTemplateNamespace = "" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.ActorTemplateNamespace = "" }),
 		field.ErrorList{field.Required(field.NewPath("actor", "actor_template_namespace"), "")},
 	}, {
 		"invalid actor.actor_template_namespace",
-		validActor(func(a *ateapipb.Actor) { a.ActorTemplateNamespace = "invalid value" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.ActorTemplateNamespace = "invalid value" }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "actor_template_namespace"), nil, "").WithOrigin("format=k8s-short-name")},
 	}, {
 		"missing actor.actor_template_name",
-		validActor(func(a *ateapipb.Actor) { a.ActorTemplateName = "" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.ActorTemplateName = "" }),
 		field.ErrorList{field.Required(field.NewPath("actor", "actor_template_name"), "")},
 	}, {
 		"invalid actor.actor_template_name",
-		validActor(func(a *ateapipb.Actor) { a.ActorTemplateName = "invalid value" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.ActorTemplateName = "invalid value" }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "actor_template_name"), nil, "").WithOrigin("format=k8s-long-name")},
 	}, {
 		"unspecified actor.status",
-		validActor(func(a *ateapipb.Actor) { a.Status = 0 }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.Status = 0 }),
 		nil,
 	}, {
 		"negative actor.status",
-		validActor(func(a *ateapipb.Actor) { a.Status = -1 }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.Status = -1 }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "status"), nil, "").WithOrigin("minimum")},
 	}, {
 		"valid actor.status",
-		validActor(func(a *ateapipb.Actor) { a.Status = ateapipb.Actor_STATUS_RUNNING }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.Status = ateapipb.Actor_STATUS_RUNNING }),
 		nil,
 	}, {
 		"invalid actor.status",
-		validActor(func(a *ateapipb.Actor) { a.Status = 1234567890 }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.Status = 1234567890 }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "status"), nil, "").WithOrigin("maximum")},
 	}, {
 		"unspecified actor.worker_assignment",
-		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment = nil }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerAssignment = nil }),
 		nil,
 	}, {
 		"valid actor.worker_assignmentat.worker_pod_ip IPv4",
-		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodIp = "1.2.3.4" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodIp = "1.2.3.4" }),
 		nil,
 	}, {
 		"valid actor.worker_assignmentat.worker_pod_ip IPv6",
-		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodIp = "1234::5678" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodIp = "1234::5678" }),
 		nil,
 	}, {
 		"unspecified actor.worker_assignment.worker_namespace",
-		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerNamespace = "" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerNamespace = "" }),
 		field.ErrorList{field.Required(field.NewPath("actor", "worker_assignment", "worker_namespace"), "")},
 	}, {
 		"invalid actor.worker_assignment.worker_namespace",
-		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerNamespace = "invalid value" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerNamespace = "invalid value" }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_assignment", "worker_namespace"), nil, "").WithOrigin("format=k8s-short-name")},
 	}, {
 		"unspecified actor.worker_assignment.worker_pool",
-		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPool = "" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPool = "" }),
 		field.ErrorList{field.Required(field.NewPath("actor", "worker_assignment", "worker_pool"), "")},
 	}, {
 		"invalid actor.worker_assignment.worker_pool",
-		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPool = "invalid value" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPool = "invalid value" }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_assignment", "worker_pool"), nil, "").WithOrigin("format=k8s-long-name")},
 	}, {
 		"unspecified actor.worker_assignment.worker_pod",
-		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPod = "" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPod = "" }),
 		field.ErrorList{field.Required(field.NewPath("actor", "worker_assignment", "worker_pod"), "")},
 	}, {
 		"invalid actor.worker_assignment.worker_pod",
-		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPod = "invalid value" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPod = "invalid value" }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_assignment", "worker_pod"), nil, "").WithOrigin("format=k8s-long-name")},
 	}, {
 		"unspecified actor.worker_assignment.worker_pod_uid",
-		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodUid = "" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodUid = "" }),
 		field.ErrorList{field.Required(field.NewPath("actor", "worker_assignment", "worker_pod_uid"), "")},
 	}, {
 		"invalid actor.worker_assignment.worker_pod_uid",
-		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodUid = "invalid value" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodUid = "invalid value" }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_assignment", "worker_pod_uid"), nil, "").WithOrigin("format=k8s-uuid")},
 	}, {
 		"unspecified actor.worker_assignment.worker_pod_ip",
-		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodIp = "" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodIp = "" }),
 		field.ErrorList{field.Required(field.NewPath("actor", "worker_assignment", "worker_pod_ip"), "")},
 	}, {
 		"invalid actor.worker_assignment.worker_pod_ip",
-		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodIp = "invalid value" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodIp = "invalid value" }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_assignment", "worker_pod_ip"), nil, "").WithOrigin("format=ip-strict")},
 	}, {
 		"valid actor.in_progress_snapshot_name: short",
-		validActor(func(a *ateapipb.Actor) { a.InProgressSnapshotName = "a value" }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.InProgressSnapshotName = "a value" }),
 		nil,
 	}, {
 		"valid actor.in_progress_snapshot_name: long",
-		validActor(func(a *ateapipb.Actor) { a.InProgressSnapshotName = strings.Repeat("x", 256) }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.InProgressSnapshotName = strings.Repeat("x", 256) }),
 		nil,
 	}, {
 		"invalid actor.in_progress_snapshot_name: too long",
-		validActor(func(a *ateapipb.Actor) { a.InProgressSnapshotName = strings.Repeat("x", 257) }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.InProgressSnapshotName = strings.Repeat("x", 257) }),
 		field.ErrorList{field.TooLongCharacters(field.NewPath("actor", "in_progress_snapshot_name"), "", 256).WithOrigin("maxLength")},
 	}, {
 		"worker_selector with nil match_labels",
-		validActor(func(a *ateapipb.Actor) { a.WorkerSelector = &ateapipb.Selector{} }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerSelector = &ateapipb.Selector{} }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_selector"), nil, "").WithOrigin("union")},
 	}, {
 		"worker_selector with empty match_labels",
-		validActor(func(a *ateapipb.Actor) { a.WorkerSelector = &ateapipb.Selector{MatchLabels: map[string]string{}} }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerSelector = &ateapipb.Selector{MatchLabels: map[string]string{}} }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_selector"), nil, "").WithOrigin("union")},
 	}, {
 		"valid worker_selector",
-		validActor(func(a *ateapipb.Actor) {
+		line(),
+		valid(func(a *ateapipb.Actor) {
 			a.WorkerSelector = &ateapipb.Selector{MatchLabels: map[string]string{"tier": "1"}}
 		}),
 		nil,
 	}, {
 		"invalid worker_selector label key",
-		validActor(func(a *ateapipb.Actor) {
+		line(),
+		valid(func(a *ateapipb.Actor) {
 			a.WorkerSelector = &ateapipb.Selector{MatchLabels: map[string]string{"bad key": "1"}}
 		}),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_selector", "match_labels"), nil, "").WithOrigin("format=k8s-label-key")},
 	}, {
 		"invalid worker_selector label value",
-		validActor(func(a *ateapipb.Actor) {
+		line(),
+		valid(func(a *ateapipb.Actor) {
 			a.WorkerSelector = &ateapipb.Selector{MatchLabels: map[string]string{"tier": "not valid!"}}
 		}),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_selector", "match_labels").Key("tier"), nil, "").WithOrigin("format=k8s-label-value")},
 	}, {
 		"worker_selector with exactly max match_labels",
-		validActor(func(a *ateapipb.Actor) { a.WorkerSelector = &ateapipb.Selector{MatchLabels: selectorLabelsOfSize(10)} }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerSelector = &ateapipb.Selector{MatchLabels: selectorLabelsOfSize(10)} }),
 		nil,
 	}, {
 		"too many worker_selector.match_labels",
-		validActor(func(a *ateapipb.Actor) { a.WorkerSelector = &ateapipb.Selector{MatchLabels: selectorLabelsOfSize(11)} }),
+		line(),
+		valid(func(a *ateapipb.Actor) { a.WorkerSelector = &ateapipb.Selector{MatchLabels: selectorLabelsOfSize(11)} }),
 		field.ErrorList{field.TooMany(field.NewPath("actor", "worker_selector", "match_labels"), 11, 10).WithOrigin("maxProperties")},
 	}}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s (L%s)", tt.name, tt.line), func(t *testing.T) {
 			assertValidateErr(t, validateCreateActorRequest(context.Background(), tt.req), tt.want)
 		})
 	}
