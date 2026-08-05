@@ -126,9 +126,52 @@ func (s *Service) UpdateActorSnapshotTag(ctx context.Context, req *ateapipb.Upda
 	if errs := validateUpdateActorSnapshotTagRequest(req); len(errs) > 0 {
 		return nil, toGRPCStatusError(errs)
 	}
+<<<<<<< HEAD
 	in := req.GetTag()
 	atespace, name := in.GetMetadata().GetAtespace(), in.GetMetadata().GetName()
+<<<<<<< HEAD
 	_, current, err := s.persistence.GetActorSnapshotByTag(ctx, atespace, name)
+||||||| parent of 9111d38c (Prefactor: Set tag update metadata in the RPC layer)
+	_, _, current, err := s.persistence.GetActorSnapshotByTag(ctx, atespace, name)
+=======
+	_, _, current, err := s.persistence.GetActorSnapshotByTag(ctx, atespace, name)
+||||||| parent of 5f0ca4f5 (Prefactor: Set tag update metadata in the RPC layer)
+	if err := validateActorSnapshotTagScope(req.GetScope()); err != nil {
+		return nil, err
+	}
+	_, _, current, err := s.persistence.GetActorSnapshotByTag(ctx, req.GetTag().GetAtespace(), req.GetTag().GetName())
+=======
+	if err := validateActorSnapshotTagScope(req.GetScope()); err != nil {
+		return nil, err
+	}
+	ref := &ateapipb.ActorSnapshotRef{Reference: &ateapipb.ActorSnapshotRef_Tag{Tag: req.GetTag()}}
+	lock, _, _, _, err := s.lockActorSnapshot(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
+	atespaceLock, err := s.persistence.AcquireLock(lock.Context(), "lock:atespace:"+req.GetTag().GetAtespace())
+	if errors.Is(err, store.ErrLockConflict) {
+		return nil, status.Error(codes.Aborted, "another operation is using this Atespace")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("while locking tag Atespace: %w", err)
+	}
+	defer atespaceLock.Close()
+
+	_, _, tag, err := s.persistence.GetActorSnapshotByTag(ctx, req.GetTag().GetAtespace(), req.GetTag().GetName())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "ActorSnapshotTag %s/%s not found", req.GetTag().GetAtespace(), req.GetTag().GetName())
+		}
+		return nil, fmt.Errorf("while getting actor snapshot tag: %w", err)
+	}
+	tag.Metadata = newMetadataForUpdate(tag.GetMetadata())
+	tag.Scope = req.GetScope()
+
+	updated, err := s.persistence.UpdateActorSnapshotTag(atespaceLock.Context(), tag)
+>>>>>>> 5f0ca4f5 (Prefactor: Set tag update metadata in the RPC layer)
+>>>>>>> 9111d38c (Prefactor: Set tag update metadata in the RPC layer)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "ActorSnapshot tag %s/%s not found", atespace, name)
 	}
@@ -158,6 +201,7 @@ func (s *Service) UpdateActorSnapshotTag(ctx context.Context, req *ateapipb.Upda
 	if err != nil {
 		return nil, fmt.Errorf("while updating actor snapshot tag: %w", err)
 	}
+<<<<<<< HEAD
 	return updatedTag, nil
 }
 
@@ -180,6 +224,11 @@ func validateUpdateActorSnapshotTagRequest(req *ateapipb.UpdateActorSnapshotTagR
 	}
 
 	return errs
+||||||| parent of 5f0ca4f5 (Prefactor: Set tag update metadata in the RPC layer)
+	return tag, nil
+=======
+	return updated, nil
+>>>>>>> 5f0ca4f5 (Prefactor: Set tag update metadata in the RPC layer)
 }
 
 func (s *Service) DeleteActorSnapshotTag(ctx context.Context, req *ateapipb.DeleteActorSnapshotTagRequest) (*ateapipb.ActorSnapshotTag, error) {

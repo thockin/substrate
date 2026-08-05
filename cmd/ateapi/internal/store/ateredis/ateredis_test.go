@@ -869,6 +869,7 @@ func TestListActors(t *testing.T) {
 
 func TestActorSnapshotLifecycle(t *testing.T) {
 	_, s, ctx := setupTest(t)
+<<<<<<< HEAD
 	snapshot := &ateapipb.ActorSnapshot{
 		Metadata:           &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: "snapshot-1"},
 		SourceActor:        &ateapipb.ObjectRef{Atespace: testAtespace, Name: "actor-1"},
@@ -876,15 +877,45 @@ func TestActorSnapshotLifecycle(t *testing.T) {
 		SourceActorVersion: 7,
 		ContentScope:       ateapipb.SnapshotContentScope_SNAPSHOT_CONTENT_SCOPE_FULL,
 		SnapshotUri:        "gs://bucket/root/snapshots/" + testAtespace + "/snapshot-1",
+||||||| parent of 9111d38c (Prefactor: Set tag update metadata in the RPC layer)
+	snapshot := &ateapipb.ActorSnapshot{
+		Metadata:           &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: "snapshot-1"},
+		SourceActor:        &ateapipb.ObjectRef{Atespace: testAtespace, Name: "actor-1"},
+		SourceActorUid:     "actor-uid",
+		SourceActorVersion: 7,
+		ContentScope:       ateapipb.SnapshotContentScope_SNAPSHOT_CONTENT_SCOPE_FULL,
+=======
+
+	const space1Name = testAtespace
+	const snap1Name = "snapshot-1"
+	const tagName = "the-tag"
+
+	// Create a snapshot
+	snap1 := &ateapipb.ActorSnapshot{
+		Metadata: &ateapipb.ResourceMetadata{Atespace: space1Name, Name: snap1Name},
+>>>>>>> 9111d38c (Prefactor: Set tag update metadata in the RPC layer)
 	}
+<<<<<<< HEAD
 	created, err := s.CreateActorSnapshot(ctx, snapshot)
+||||||| parent of 9111d38c (Prefactor: Set tag update metadata in the RPC layer)
+	created, err := s.CreateActorSnapshot(ctx, snapshot, "gs://private/snapshot-1")
+=======
+	createdSnap1, err := s.CreateActorSnapshot(ctx, snap1, "gs://private/snapshot-1")
+>>>>>>> 9111d38c (Prefactor: Set tag update metadata in the RPC layer)
 	if err != nil {
 		t.Fatalf("CreateActorSnapshot: %v", err)
 	}
+<<<<<<< HEAD
 	got, err := s.GetActorSnapshot(ctx, testAtespace, "snapshot-1")
+||||||| parent of 9111d38c (Prefactor: Set tag update metadata in the RPC layer)
+	got, location, err := s.GetActorSnapshot(ctx, testAtespace, "snapshot-1")
+=======
+	gotSnap1, gotLoc1, err := s.GetActorSnapshot(ctx, space1Name, snap1Name)
+>>>>>>> 9111d38c (Prefactor: Set tag update metadata in the RPC layer)
 	if err != nil {
 		t.Fatalf("GetActorSnapshot: %v", err)
 	}
+<<<<<<< HEAD
 	// The store round-trips the whole resource, snapshot_uri included: it is
 	// an ordinary field now, not a value the store keeps beside the record.
 	if !proto.Equal(created, got) {
@@ -930,16 +961,141 @@ func TestActorSnapshotLifecycle(t *testing.T) {
 	listed, _, err := s.ListActorSnapshots(ctx, testAtespace, 10, "")
 	if err != nil || len(listed) != 1 {
 		t.Fatalf("ListActorSnapshots = (%v, %v), want one", listed, err)
+||||||| parent of 9111d38c (Prefactor: Set tag update metadata in the RPC layer)
+	if !proto.Equal(created, got) || location != "gs://private/snapshot-1" {
+		t.Fatalf("GetActorSnapshot = (%v, %q), want (%v, private location)", got, location, created)
+	}
+	tag := &ateapipb.ActorSnapshotTag{
+		Metadata: &ateapipb.ResourceMetadata{Atespace: testAtespace, Name: "before-upgrade"},
+		Scope:    ateapipb.ActorSnapshotTagScope_ACTOR_SNAPSHOT_TAG_SCOPE_ATESPACE,
+	}
+	tagged, err := s.TagActorSnapshot(ctx, testAtespace, "snapshot-1", tag)
+	if err != nil || tagged.GetSnapshot().GetName() != "snapshot-1" {
+		t.Fatalf("TagActorSnapshot = (%v, %v), want stable tag", tagged, err)
+	}
+	byTag, _, resolvedTag, err := s.GetActorSnapshotByTag(ctx, testAtespace, "before-upgrade")
+	if err != nil || !proto.Equal(created, byTag) || !proto.Equal(tagged, resolvedTag) {
+		t.Fatalf("GetActorSnapshotByTag = (%v, %v, %v), want tagged snapshot", byTag, resolvedTag, err)
+	}
+	if _, err := s.CreateActorSnapshot(ctx, &ateapipb.ActorSnapshot{
+		Metadata: &ateapipb.ResourceMetadata{Atespace: "other", Name: "snapshot-2"},
+	}, "gs://private/snapshot-2"); err != nil {
+		t.Fatalf("CreateActorSnapshot second snapshot: %v", err)
+	}
+	otherTag := &ateapipb.ActorSnapshotTag{Metadata: &ateapipb.ResourceMetadata{Atespace: "other", Name: "before-upgrade"}, Scope: ateapipb.ActorSnapshotTagScope_ACTOR_SNAPSHOT_TAG_SCOPE_ATESPACE}
+	if _, err := s.TagActorSnapshot(ctx, "other", "snapshot-2", otherTag); err != nil {
+		t.Fatalf("same tag name in another Atespace: %v", err)
+	}
+	if _, err := s.TagActorSnapshot(ctx, "other", "snapshot-2", tag); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("duplicate Atespace tag error = %v, want ErrAlreadyExists", err)
+	}
+	differentScope := proto.Clone(tag).(*ateapipb.ActorSnapshotTag)
+	differentScope.Scope = ateapipb.ActorSnapshotTagScope_ACTOR_SNAPSHOT_TAG_SCOPE_PUBLISHED
+	if _, err := s.TagActorSnapshot(ctx, testAtespace, "snapshot-1", differentScope); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("re-tag with different scope error = %v, want ErrAlreadyExists", err)
+	}
+	tagged, err = s.UpdateActorSnapshotTag(ctx, testAtespace, "before-upgrade", ateapipb.ActorSnapshotTagScope_ACTOR_SNAPSHOT_TAG_SCOPE_PUBLISHED, tagged.GetMetadata().GetVersion())
+	if err != nil || tagged.GetScope() != ateapipb.ActorSnapshotTagScope_ACTOR_SNAPSHOT_TAG_SCOPE_PUBLISHED {
+		t.Fatalf("UpdateActorSnapshotTag = (%v, %v), want published", tagged, err)
+	}
+	if byTag, _, resolvedTag, err = s.GetActorSnapshotByTag(ctx, testAtespace, "before-upgrade"); err != nil || byTag.GetMetadata().GetUid() != created.GetMetadata().GetUid() || resolvedTag.GetScope() != ateapipb.ActorSnapshotTagScope_ACTOR_SNAPSHOT_TAG_SCOPE_PUBLISHED {
+		t.Fatalf("tag after publication = (%v, %v, %v), want same address and snapshot", byTag, resolvedTag, err)
+	}
+	listed, _, err := s.ListActorSnapshots(ctx, testAtespace, 10, "")
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("ListActorSnapshots = (%v, %v), want one", listed, err)
+=======
+	if !proto.Equal(createdSnap1, gotSnap1) || gotLoc1 != "gs://private/snapshot-1" {
+		t.Fatalf("GetActorSnapshot = (%v, %q), want (%v, private location)", gotSnap1, gotLoc1, createdSnap1)
+>>>>>>> 9111d38c (Prefactor: Set tag update metadata in the RPC layer)
 	}
 
-	deleted, err := s.DeleteActorSnapshotTag(ctx, testAtespace, "before-upgrade")
-	if err != nil || deleted.GetMetadata().GetName() != "before-upgrade" {
+	// Tag it
+	tag1 := &ateapipb.ActorSnapshotTag{
+		Metadata: &ateapipb.ResourceMetadata{Atespace: space1Name, Name: tagName},
+		Scope:    ateapipb.ActorSnapshotTagScope_ACTOR_SNAPSHOT_TAG_SCOPE_ATESPACE,
+	}
+	createdTag1, err := s.TagActorSnapshot(ctx, space1Name, snap1Name, tag1)
+	if err != nil || createdTag1.GetSnapshot().GetName() != snap1Name {
+		t.Fatalf("TagActorSnapshot = (%v, %v), want stable tag", createdTag1, err)
+	}
+
+	// Lookup the snapshot by tag
+	snap1ByTag, _, tag1Resolved, err := s.GetActorSnapshotByTag(ctx, space1Name, tagName)
+	if err != nil || !proto.Equal(createdSnap1, snap1ByTag) || !proto.Equal(createdTag1, tag1Resolved) {
+		t.Fatalf("GetActorSnapshotByTag = (%v, %v, %v), want tagged snapshot", snap1ByTag, tag1Resolved, err)
+	}
+
+	// Attempt to publish a tag with the same name but different scope
+	publishedTag1 := proto.CloneOf(tag1)
+	publishedTag1.Scope = ateapipb.ActorSnapshotTagScope_ACTOR_SNAPSHOT_TAG_SCOPE_PUBLISHED
+	if _, err := s.TagActorSnapshot(ctx, space1Name, snap1Name, publishedTag1); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("re-tag with different scope error = %v, want ErrAlreadyExists", err)
+	}
+
+	// Update the tag with a different scope
+	createdTag1.Scope = ateapipb.ActorSnapshotTagScope_ACTOR_SNAPSHOT_TAG_SCOPE_PUBLISHED
+	updatedTag1, err := s.UpdateActorSnapshotTag(ctx, createdTag1)
+	if err != nil || updatedTag1.GetScope() != ateapipb.ActorSnapshotTagScope_ACTOR_SNAPSHOT_TAG_SCOPE_PUBLISHED {
+		t.Fatalf("UpdateActorSnapshotTag = (%v, %v), want published", updatedTag1, err)
+	}
+
+	// Verify the updated scope
+	snap1ByTagUpdated, _, tag1UpdatedResolved, err := s.GetActorSnapshotByTag(ctx, space1Name, tagName)
+	if err != nil || snap1ByTagUpdated.GetMetadata().GetUid() != createdSnap1.GetMetadata().GetUid() || tag1UpdatedResolved.GetScope() != ateapipb.ActorSnapshotTagScope_ACTOR_SNAPSHOT_TAG_SCOPE_PUBLISHED {
+		t.Fatalf("tag after publication = (%v, %v, %v), want same address and snapshot", snap1ByTagUpdated, tag1UpdatedResolved, err)
+	}
+
+	const space2Name = space1Name + "-other"
+	const snap2Name = "snapshot-2"
+
+	// Create a second snapshot
+	snapshot2 := &ateapipb.ActorSnapshot{
+		Metadata: &ateapipb.ResourceMetadata{Atespace: space2Name, Name: snap2Name},
+	}
+	if _, err := s.CreateActorSnapshot(ctx, snapshot2, "gs://private/snapshot-2"); err != nil {
+		t.Fatalf("CreateActorSnapshot second snapshot: %v", err)
+	}
+
+	// Tag it with the same tag name as before, different atespace
+	tag2 := &ateapipb.ActorSnapshotTag{
+		Metadata: &ateapipb.ResourceMetadata{Atespace: space2Name, Name: tagName},
+		Scope:    ateapipb.ActorSnapshotTagScope_ACTOR_SNAPSHOT_TAG_SCOPE_ATESPACE,
+	}
+	if _, err := s.TagActorSnapshot(ctx, space2Name, snap2Name, tag2); err != nil {
+		t.Fatalf("same tag name in another Atespace: %v", err)
+	}
+
+	// Attempt to tag another snapshot with the same tag name
+	tag3 := &ateapipb.ActorSnapshotTag{
+		Metadata: &ateapipb.ResourceMetadata{Atespace: space1Name, Name: tagName},
+		Scope:    ateapipb.ActorSnapshotTagScope_ACTOR_SNAPSHOT_TAG_SCOPE_ATESPACE,
+	}
+	if _, err := s.TagActorSnapshot(ctx, space2Name, snap2Name, tag3); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("duplicate Atespace tag error = %v, want ErrAlreadyExists", err)
+	}
+
+	// Delete the first tag
+	deleted, err := s.DeleteActorSnapshotTag(ctx, space1Name, tagName)
+	if err != nil || deleted.GetMetadata().GetName() != tagName {
 		t.Fatalf("DeleteActorSnapshotTag = (%v, %v)", deleted, err)
 	}
+<<<<<<< HEAD
 	if _, _, err := s.GetActorSnapshotByTag(ctx, testAtespace, "before-upgrade"); !errors.Is(err, store.ErrNotFound) {
+||||||| parent of 9111d38c (Prefactor: Set tag update metadata in the RPC layer)
+	if _, _, _, err := s.GetActorSnapshotByTag(ctx, testAtespace, "before-upgrade"); !errors.Is(err, store.ErrNotFound) {
+=======
+	if _, _, _, err := s.GetActorSnapshotByTag(ctx, space1Name, tagName); !errors.Is(err, store.ErrNotFound) {
+>>>>>>> 9111d38c (Prefactor: Set tag update metadata in the RPC layer)
 		t.Fatalf("deleted tag lookup = %v, want ErrNotFound", err)
 	}
+<<<<<<< HEAD
 	if got, err := s.GetActorSnapshot(ctx, testAtespace, "snapshot-1"); err != nil || got.GetMetadata().GetUid() != created.GetMetadata().GetUid() {
+||||||| parent of 9111d38c (Prefactor: Set tag update metadata in the RPC layer)
+	if got, _, err := s.GetActorSnapshot(ctx, testAtespace, "snapshot-1"); err != nil || got.GetMetadata().GetUid() != created.GetMetadata().GetUid() {
+=======
+	if got, _, err := s.GetActorSnapshot(ctx, space1Name, snap1Name); err != nil || got.GetMetadata().GetUid() != createdSnap1.GetMetadata().GetUid() {
+>>>>>>> 9111d38c (Prefactor: Set tag update metadata in the RPC layer)
 		t.Fatalf("snapshot after tag deletion = (%v, %v), want retained metadata", got, err)
 	}
 }

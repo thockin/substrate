@@ -529,47 +529,14 @@ func (s *Persistence) TagActorSnapshot(ctx context.Context, atespace, name strin
 	return dbTag, nil
 }
 
-func (s *Persistence) UpdateActorSnapshotTag(ctx context.Context, atespace, name string, scope ateapipb.ActorSnapshotTagScope, expectedVersion int64) (*ateapipb.ActorSnapshotTag, error) {
-	tagKey := actorSnapshotTagDBKey(atespace, name)
-	var updated *ateapipb.ActorSnapshotTag
-	err := s.rdb.Watch(ctx, func(tx *redis.Tx) error {
-		b, err := tx.Get(ctx, tagKey).Bytes()
-		if err != nil {
-			if errors.Is(err, redis.Nil) {
-				return store.ErrNotFound
-			}
-			return err
-		}
-		tag := &ateapipb.ActorSnapshotTag{}
-		if err := protojson.Unmarshal(b, tag); err != nil {
-			return fmt.Errorf("while unmarshaling actor snapshot tag %s/%s: %w", atespace, name, err)
-		}
-		if tag.GetMetadata().GetVersion() != expectedVersion {
-			return store.ErrVersionConflict
-		}
-		if tag.GetScope() == scope {
-			updated = tag
-			return nil
-		}
-		tag.Scope = scope
-		tag.Metadata = newUpdateMetadata(tag.GetMetadata())
-		b, err = protojson.Marshal(tag)
-		if err != nil {
-			return fmt.Errorf("while marshaling actor snapshot tag: %w", err)
-		}
-		if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-			pipe.Set(ctx, tagKey, b, 0)
-			return nil
-		}); err != nil {
-			return err
-		}
-		updated = tag
-		return nil
-	}, tagKey)
-	if errors.Is(err, redis.TxFailedErr) {
-		return nil, store.ErrVersionConflict
-	}
+func (s *Persistence) UpdateActorSnapshotTag(ctx context.Context, tag *ateapipb.ActorSnapshotTag) (*ateapipb.ActorSnapshotTag, error) {
+	dbKey := actorSnapshotTagDBKey(tag.Metadata.Atespace, tag.Metadata.Name)
+
+	b, err := protojson.Marshal(tag)
 	if err != nil {
+		return nil, fmt.Errorf("while marshaling actor snapshot tag: %w", err)
+	}
+	if err := s.rdb.Set(ctx, dbKey, b, 0).Err(); err != nil {
 		return nil, fmt.Errorf("while updating actor snapshot tag: %w", err)
 	}
 	return updated, nil
@@ -1252,6 +1219,7 @@ func (s *Persistence) releaseLock(ctx context.Context, key, value string) error 
 	return nil
 }
 
+// TODO: move this to the RPC layer
 func newCreateMetadata(atespace, name string) *ateapipb.ResourceMetadata {
 	now := timestamppb.Now()
 	return &ateapipb.ResourceMetadata{
@@ -1262,11 +1230,4 @@ func newCreateMetadata(atespace, name string) *ateapipb.ResourceMetadata {
 		CreateTime: now,
 		UpdateTime: now,
 	}
-}
-
-func newUpdateMetadata(current *ateapipb.ResourceMetadata) *ateapipb.ResourceMetadata {
-	next := proto.Clone(current).(*ateapipb.ResourceMetadata)
-	next.Version = current.GetVersion() + 1
-	next.UpdateTime = timestamppb.Now()
-	return next
 }
