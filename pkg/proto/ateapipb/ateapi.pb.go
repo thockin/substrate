@@ -688,8 +688,10 @@ type Actor struct {
 	// Unset whenever the Actor has no worker (SUSPENDED, PAUSED, CRASHED).
 	//
 	// +k8s:optional
-	WorkerAssignment       *WorkerAssignment `protobuf:"bytes,5,opt,name=worker_assignment,json=workerAssignment,proto3" json:"worker_assignment,omitempty"`
-	InProgressSnapshotName string            `protobuf:"bytes,6,opt,name=in_progress_snapshot_name,json=inProgressSnapshotName,proto3" json:"in_progress_snapshot_name,omitempty"`
+	WorkerAssignment *WorkerAssignment `protobuf:"bytes,5,opt,name=worker_assignment,json=workerAssignment,proto3" json:"worker_assignment,omitempty"`
+	// +k8s:optional
+	// +k8s:maxLength=256
+	InProgressSnapshotName string `protobuf:"bytes,6,opt,name=in_progress_snapshot_name,json=inProgressSnapshotName,proto3" json:"in_progress_snapshot_name,omitempty"`
 	// worker_selector is the per-actor placement constraint. The scheduler
 	// evaluates the AND of this selector and the template's workerSelector to
 	// find eligible pools. Set at CreateActor; may be updated at any time via

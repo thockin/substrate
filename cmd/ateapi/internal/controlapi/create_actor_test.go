@@ -16,6 +16,7 @@ package controlapi
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -202,6 +203,18 @@ func TestValidateCreateActorRequest(t *testing.T) {
 		"invalid actor.worker_assignment.worker_pod_ip",
 		validActor(func(a *ateapipb.Actor) { a.WorkerAssignment.WorkerPodIp = "invalid value" }),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_assignment", "worker_pod_ip"), nil, "").WithOrigin("format=ip-strict")},
+	}, {
+		"valid actor.in_progress_snapshot_name: short",
+		validActor(func(a *ateapipb.Actor) { a.InProgressSnapshotName = "a value" }),
+		nil,
+	}, {
+		"valid actor.in_progress_snapshot_name: long",
+		validActor(func(a *ateapipb.Actor) { a.InProgressSnapshotName = strings.Repeat("x", 256) }),
+		nil,
+	}, {
+		"invalid actor.in_progress_snapshot_name: too long",
+		validActor(func(a *ateapipb.Actor) { a.InProgressSnapshotName = strings.Repeat("x", 257) }),
+		field.ErrorList{field.TooLongCharacters(field.NewPath("actor", "in_progress_snapshot_name"), "", 256).WithOrigin("maxLength")},
 	}, {
 		"worker_selector with nil match_labels",
 		validActor(func(a *ateapipb.Actor) { a.WorkerSelector = &ateapipb.Selector{} }),
