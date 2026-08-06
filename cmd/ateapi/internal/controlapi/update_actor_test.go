@@ -33,6 +33,28 @@ import (
 )
 
 func TestValidateUpdateActorRequest(t *testing.T) {
+	valid := func(mutate ...func(*ateapipb.UpdateActorRequest)) *ateapipb.UpdateActorRequest {
+		req := &ateapipb.UpdateActorRequest{
+			Actor:      validActor(nil),
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"worker_selector"}},
+		}
+		for _, m := range mutate {
+			m(req)
+		}
+		return req
+	}
+	withMetadata := func(mutate func(*ateapipb.ResourceMetadata)) func(*ateapipb.UpdateActorRequest) {
+		return func(req *ateapipb.UpdateActorRequest) { mutate(req.GetActor().GetMetadata()) }
+	}
+	withMaskPaths := func(paths ...string) func(*ateapipb.UpdateActorRequest) {
+		return func(req *ateapipb.UpdateActorRequest) { req.UpdateMask = &fieldmaskpb.FieldMask{Paths: paths} }
+	}
+	withSelector := func(labels map[string]string) func(*ateapipb.UpdateActorRequest) {
+		return func(req *ateapipb.UpdateActorRequest) {
+			req.GetActor().WorkerSelector = &ateapipb.Selector{MatchLabels: labels}
+		}
+	}
+
 	mutableFields := []string{
 		"worker_selector",
 		"worker_selector.match_labels",
@@ -44,89 +66,89 @@ func TestValidateUpdateActorRequest(t *testing.T) {
 		want field.ErrorList
 	}{{
 		"valid",
-		updateActorReq(),
+		valid(),
 		nil,
 	}, {
 		"missing actor",
-		&ateapipb.UpdateActorRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"worker_selector"}}},
+		valid(func(req *ateapipb.UpdateActorRequest) { req.Actor = nil }),
 		field.ErrorList{field.Required(field.NewPath("actor"), "")},
 	}, {
 		"missing actor.metadata.atespace",
-		updateActorReq(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Atespace = "" })),
+		valid(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Atespace = "" })),
 		field.ErrorList{field.Required(field.NewPath("actor", "metadata", "atespace"), "")},
 	}, {
 		"invalid actor.metadata.atespace",
-		updateActorReq(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Atespace = "NS1" })),
+		valid(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Atespace = "NS1" })),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "atespace"), "NS1", "")},
 	}, {
 		"missing actor.metadata.name",
-		updateActorReq(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Name = "" })),
+		valid(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Name = "" })),
 		field.ErrorList{field.Required(field.NewPath("actor", "metadata", "name"), "")},
 	}, {
 		"invalid actor.metadata.name",
-		updateActorReq(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Name = "ID1" })),
+		valid(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Name = "ID1" })),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "name"), "ID1", "")},
 	}, {
 		"valid actor.metadata.uid precondition",
-		updateActorReq(withMetadata(func(m *ateapipb.ResourceMetadata) {
+		valid(withMetadata(func(m *ateapipb.ResourceMetadata) {
 			m.Uid = "2a5f8c1e-9b3d-4f7a-8e6c-1d0b4a7f2e93"
 		})),
 		nil,
 	}, {
 		"invalid actor.metadata.uid precondition",
-		updateActorReq(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Uid = "not-a-uuid" })),
+		valid(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Uid = "not-a-uuid" })),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "uid"), "not-a-uuid", "")},
 	}, {
 		"valid actor.metadata.version precondition",
-		updateActorReq(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Version = 7 })),
+		valid(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Version = 7 })),
 		nil,
 	}, {
 		"negative actor.metadata.version precondition",
-		updateActorReq(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Version = -1 })),
+		valid(withMetadata(func(m *ateapipb.ResourceMetadata) { m.Version = -1 })),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "metadata", "version"), int64(-1), "")},
 	}, {
 		"missing update_mask",
-		updateActorReq(func(req *ateapipb.UpdateActorRequest) { req.UpdateMask = nil }),
+		valid(func(req *ateapipb.UpdateActorRequest) { req.UpdateMask = nil }),
 		field.ErrorList{field.Required(field.NewPath("update_mask"), "")},
 	}, {
 		"empty update_mask",
-		updateActorReq(withMaskPaths()),
+		valid(withMaskPaths()),
 		field.ErrorList{field.Required(field.NewPath("update_mask"), "")},
 	}, {
 		"wildcard update_mask",
-		updateActorReq(withMaskPaths("*")),
+		valid(withMaskPaths("*")),
 		field.ErrorList{field.NotSupported(field.NewPath("update_mask"), "*", mutableFields)},
 	}, {
 		"output-only field in update_mask",
-		updateActorReq(withMaskPaths("status")),
+		valid(withMaskPaths("status")),
 		field.ErrorList{field.NotSupported(field.NewPath("update_mask"), "status", mutableFields)},
 	}, {
 		"immutable field in update_mask",
-		updateActorReq(withMaskPaths("metadata.name")),
+		valid(withMaskPaths("metadata.name")),
 		field.ErrorList{field.NotSupported(field.NewPath("update_mask"), "metadata.name", mutableFields)},
 	}, {
 		"leaf path under a whole-mutable field, also separately mutable",
-		updateActorReq(withMaskPaths("worker_selector.match_labels")),
+		valid(withMaskPaths("worker_selector.match_labels")),
 		nil,
 	}, {
 		"nil worker_selector",
-		updateActorReq(),
+		valid(),
 		nil,
 	}, {
 		"valid worker_selector",
-		updateActorReq(withSelector(map[string]string{"tier": "1"})),
+		valid(withSelector(map[string]string{"tier": "1"})),
 		nil,
 	}, {
 		"invalid worker_selector label key",
-		updateActorReq(withSelector(map[string]string{"bad key!": "1"})),
+		valid(withSelector(map[string]string{"bad key!": "1"})),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_selector", "match_labels").Key("bad key!"), "bad key!", "")},
 	}, {
 		"invalid worker_selector label value",
-		updateActorReq(withSelector(map[string]string{"tier": "not valid!"})),
+		valid(withSelector(map[string]string{"tier": "not valid!"})),
 		field.ErrorList{field.Invalid(field.NewPath("actor", "worker_selector", "match_labels").Key("tier"), "not valid!", "")},
 	}, {
 		"too many worker_selector.match_labels",
-		updateActorReq(withSelector(selectorLabelsOfSize(11))),
+		valid(withSelector(selectorLabelsOfSize(11))),
 		field.ErrorList{field.TooMany(field.NewPath("actor", "worker_selector", "match_labels"), 11, 10)},
 	}}
 	for _, tt := range tests {
@@ -414,33 +436,6 @@ func TestUpdateActor_ConcurrentDisjointUpdates(t *testing.T) {
 	}
 	if got := stored.GetStatus(); got != ateapipb.Actor_STATUS_SUSPENDING {
 		t.Errorf("stored status = %v, want %v: the concurrent writer's field must survive", got, ateapipb.Actor_STATUS_SUSPENDING)
-	}
-}
-
-// updateActorReq builds a minimal valid UpdateActorRequest, then applies the
-// given mutations.
-func updateActorReq(mutate ...func(*ateapipb.UpdateActorRequest)) *ateapipb.UpdateActorRequest {
-	req := &ateapipb.UpdateActorRequest{
-		Actor:      &ateapipb.Actor{Metadata: &ateapipb.ResourceMetadata{Atespace: "ns1", Name: "id1"}},
-		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"worker_selector"}},
-	}
-	for _, m := range mutate {
-		m(req)
-	}
-	return req
-}
-
-func withMetadata(mutate func(*ateapipb.ResourceMetadata)) func(*ateapipb.UpdateActorRequest) {
-	return func(req *ateapipb.UpdateActorRequest) { mutate(req.GetActor().GetMetadata()) }
-}
-
-func withMaskPaths(paths ...string) func(*ateapipb.UpdateActorRequest) {
-	return func(req *ateapipb.UpdateActorRequest) { req.UpdateMask = &fieldmaskpb.FieldMask{Paths: paths} }
-}
-
-func withSelector(labels map[string]string) func(*ateapipb.UpdateActorRequest) {
-	return func(req *ateapipb.UpdateActorRequest) {
-		req.GetActor().WorkerSelector = &ateapipb.Selector{MatchLabels: labels}
 	}
 }
 

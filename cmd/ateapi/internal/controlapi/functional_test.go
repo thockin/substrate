@@ -56,7 +56,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -3489,11 +3488,6 @@ func TestDeleteAtespace_NotFound(t *testing.T) {
 
 	_, err := tc.client.DeleteAtespace(context.Background(), &ateapipb.DeleteAtespaceRequest{Atespace: &ateapipb.ObjectRef{Name: "nope"}})
 	assertGrpcError(t, err, codes.NotFound, "Atespace nope not found")
-}
-
-func assertValidateErr(t *testing.T, got field.ErrorList, want field.ErrorList) {
-	t.Helper()
-	field.ErrorMatcher{}.ByType().ByField().ByOrigin().Test(t, want, got)
 }
 
 // TestSuspendActor_FromPaused suspends a PAUSED actor end-to-end: instead of

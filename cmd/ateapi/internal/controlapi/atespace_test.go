@@ -24,12 +24,12 @@ import (
 )
 
 func TestValidateCreateAtespaceRequest(t *testing.T) {
-	valid := func(mutate func(*ateapipb.Atespace)) *ateapipb.CreateAtespaceRequest {
+	valid := func(mutate ...func(*ateapipb.Atespace)) *ateapipb.CreateAtespaceRequest {
 		a := &ateapipb.Atespace{
 			Metadata: &ateapipb.ResourceMetadata{Atespace: "", Name: "as1"},
 		}
-		if mutate != nil {
-			mutate(a)
+		for _, m := range mutate {
+			m(a)
 		}
 		return &ateapipb.CreateAtespaceRequest{Atespace: a}
 	}
@@ -40,7 +40,7 @@ func TestValidateCreateAtespaceRequest(t *testing.T) {
 		want field.ErrorList
 	}{{
 		"valid",
-		valid(nil),
+		valid(),
 		nil,
 	}, {
 		"missing atespace",
