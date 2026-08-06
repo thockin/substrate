@@ -422,8 +422,13 @@ func (x *LocalSnapshotInfo) GetContentScope() SnapshotContentScope {
 // Selector matches worker pools by label.
 // Only equality-based matching is supported.
 type Selector struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MatchLabels   map[string]string      `protobuf:"bytes,1,rep,name=match_labels,json=matchLabels,proto3" json:"match_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// +k8s:optional
+	// +k8s:unionMember
+	// +k8s:maxProperties=10
+	// +k8s:eachKey=+k8s:format=k8s-label-key
+	// +k8s:eachVal=+k8s:format=k8s-label-value
+	MatchLabels   map[string]string `protobuf:"bytes,1,rep,name=match_labels,json=matchLabels,proto3" json:"match_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -696,6 +701,8 @@ type Actor struct {
 	// evaluates the AND of this selector and the template's workerSelector to
 	// find eligible pools. Set at CreateActor; may be updated at any time via
 	// UpdateActor. Changes take effect on the next ResumeActor call.
+	//
+	// +k8s:optional
 	WorkerSelector *Selector `protobuf:"bytes,7,opt,name=worker_selector,json=workerSelector,proto3" json:"worker_selector,omitempty"`
 	// The latest durable snapshot created for this Actor.
 	LatestSnapshot *ObjectRef `protobuf:"bytes,8,opt,name=latest_snapshot,json=latestSnapshot,proto3" json:"latest_snapshot,omitempty"`
