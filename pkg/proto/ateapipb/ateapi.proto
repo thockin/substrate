@@ -263,6 +263,8 @@ message Actor {
   // +k8s:optional
   WorkerAssignment worker_assignment = 5;
 
+  // +k8s:optional
+  // +k8s:maxLength=256
   string in_progress_snapshot_name = 6;
 
   // worker_selector is the per-actor placement constraint. The scheduler

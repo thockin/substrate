@@ -211,7 +211,37 @@ func Validate_Actor(
 		errs = append(errs, fn(fldPath.Child("worker_assignment"), obj.WorkerAssignment, oldVal, oldObj != nil)...)
 	}
 
-	// field Actor.InProgressSnapshotName has no validation
+	{ // field Actor.InProgressSnapshotName
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *string,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if obj == oldObj || (obj != nil && oldObj != nil && *obj == *oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.OptionalValue(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			if e := validate.MaxLength(ctx, op, fldPath, obj, oldObj, 256); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *Actor) *string {
+				return &oldObj.InProgressSnapshotName
+			})
+		errs = append(errs, fn(fldPath.Child("in_progress_snapshot_name"), &obj.InProgressSnapshotName, oldVal, oldObj != nil)...)
+	}
+
 	// field Actor.WorkerSelector has no validation
 	// field Actor.LatestSnapshot has no validation
 	// field Actor.LocalSnapshotInfo has no validation
