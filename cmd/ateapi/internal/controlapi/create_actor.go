@@ -141,16 +141,6 @@ func validateCreateActorRequest(ctx context.Context, req *ateapipb.CreateActorRe
 	var fldPath *field.Path
 	errs := req.Validate(ctx) // TODO: move to caller when all manual validation is removed.
 
-	actor := req.GetActor()
-	actorPath := fldPath.Child("actor")
-	if actor == nil {
-		// handled by DV
-		return errs
-	}
-
-	if val := actor.GetWorkerSelector(); val != nil {
-		errs = append(errs, validateSelector(val, actorPath.Child("worker_selector"))...)
-	}
 	if val := req.GetSourceSnapshot(); val != nil {
 		if err := validateActorSnapshotRef(val, "source_snapshot"); err != nil {
 			errs = append(errs, field.Invalid(fldPath.Child("source_snapshot"), val, err.Error()))
@@ -160,6 +150,7 @@ func validateCreateActorRequest(ctx context.Context, req *ateapipb.CreateActorRe
 	return errs
 }
 
+// TODO: remove when done with update DV
 func validateSelector(sel *ateapipb.Selector, fldPath *field.Path) field.ErrorList {
 	var errs field.ErrorList
 
