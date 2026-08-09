@@ -40,10 +40,12 @@ func applyUpdateMask[T any](dst, src T, mask *fieldmaskpb.FieldMask, fields muta
 
 // updateMaskPath is the update_mask request field that's required for
 // update requests.
+// TODO: remove when DV is done
 var updateMaskPath = field.NewPath("update_mask")
 
 // validateUpdateMask checks that mask sets at least one field and that every
 // path it sets is mutable.
+// TODO: remove when DV is done
 func validateUpdateMask[T any](mask *fieldmaskpb.FieldMask, fields mutableFields[T]) field.ErrorList {
 	paths := mask.GetPaths()
 	if len(paths) == 0 {

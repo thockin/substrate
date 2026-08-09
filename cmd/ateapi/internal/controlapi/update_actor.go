@@ -67,6 +67,8 @@ func (s *Service) UpdateActor(ctx context.Context, req *ateapipb.UpdateActorRequ
 }
 
 func validateUpdateActorRequest(ctx context.Context, req *ateapipb.UpdateActorRequest) field.ErrorList {
+	// Call the generated validation.
+	//
 	// We model this as a create rather than an update because updates assume a
 	// "current" value, which is not true for the Update*Request types.
 	op := operation.Operation{Type: operation.Create}
@@ -82,8 +84,6 @@ func validateUpdateActorRequest(ctx context.Context, req *ateapipb.UpdateActorRe
 	}
 
 	errs = append(errs, resources.ValidateResourceMetadataRef(actor.GetMetadata(), actorPath.Child("metadata"))...)
-
-	errs = append(errs, validateUpdateMask(req.GetUpdateMask(), actorMutableFields)...)
 
 	if selector := actor.GetWorkerSelector(); selector != nil {
 		errs = append(errs, validateSelector(selector, actorPath.Child("worker_selector"))...)

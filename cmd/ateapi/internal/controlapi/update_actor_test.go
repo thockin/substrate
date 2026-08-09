@@ -16,6 +16,8 @@ package controlapi
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -53,7 +55,8 @@ func TestValidateUpdateActorRequest(t *testing.T) {
 		}
 	}
 
-	mutableFields := []string{"worker_selector"}
+	mutableFields := slices.Collect(maps.Keys(actorMutableFields))
+	slices.Sort(mutableFields)
 
 	tests := []struct {
 		name string
@@ -108,23 +111,23 @@ func TestValidateUpdateActorRequest(t *testing.T) {
 	}, {
 		"empty update_mask",
 		valid(withMaskPaths()),
-		field.ErrorList{field.Required(field.NewPath("update_mask"), "")},
+		field.ErrorList{field.TooFew(field.NewPath("update_mask", "paths"), 0, 1).WithOrigin("minItems")},
 	}, {
 		"wildcard update_mask",
 		valid(withMaskPaths("*")),
-		field.ErrorList{field.NotSupported(field.NewPath("update_mask"), "*", mutableFields)},
+		field.ErrorList{field.NotSupported(field.NewPath("update_mask", "paths"), "*", mutableFields)},
 	}, {
 		"output-only field in update_mask",
 		valid(withMaskPaths("status")),
-		field.ErrorList{field.NotSupported(field.NewPath("update_mask"), "status", mutableFields)},
+		field.ErrorList{field.NotSupported(field.NewPath("update_mask", "paths"), "status", mutableFields)},
 	}, {
 		"immutable field in update_mask",
 		valid(withMaskPaths("metadata.name")),
-		field.ErrorList{field.NotSupported(field.NewPath("update_mask"), "metadata.name", mutableFields)},
+		field.ErrorList{field.NotSupported(field.NewPath("update_mask", "paths"), "metadata.name", mutableFields)},
 	}, {
 		"nested path in update_mask",
 		valid(withMaskPaths("worker_selector.match_labels")),
-		field.ErrorList{field.NotSupported(field.NewPath("update_mask"), "worker_selector.match_labels", mutableFields)},
+		field.ErrorList{field.NotSupported(field.NewPath("update_mask", "paths"), "worker_selector.match_labels", mutableFields)},
 	}, {
 		"nil worker_selector",
 		valid(),
