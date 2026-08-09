@@ -1677,6 +1677,10 @@ type UpdateActorRequest struct {
 	//
 	// Only the following fields are supported:
 	//   - worker_selector
+	//
+	// +k8s:required
+	// +k8s:subfield(paths)=+k8s:minItems=1
+	// +k8s:customValidation # to handle path validation
 	UpdateMask    *fieldmaskpb.FieldMask `protobuf:"bytes,2,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

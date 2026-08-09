@@ -69,9 +69,5 @@ func (s *Service) UpdateActor(ctx context.Context, req *ateapipb.UpdateActorRequ
 func validateUpdateActorRequest(ctx context.Context, req *ateapipb.UpdateActorRequest) field.ErrorList {
 	// Call the generated validation.
 	op := operation.Operation{Type: operation.Update}
-	errs := Validate_UpdateActorRequest(ctx, op, nil, req, nil)
-
-	// TODO: remove when done with DV
-	errs = append(errs, validateUpdateMask(req.GetUpdateMask(), actorMutableFields)...)
-	return errs
+	return Validate_UpdateActorRequest(ctx, op, nil, req, nil)
 }

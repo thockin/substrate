@@ -431,6 +431,10 @@ message UpdateActorRequest {
   //
   // Only the following fields are supported:
   //   - worker_selector
+  //
+  // +k8s:required
+  // +k8s:subfield(paths)=+k8s:minItems=1
+  // +k8s:customValidation # to handle path validation
   google.protobuf.FieldMask update_mask = 2;
 }
 

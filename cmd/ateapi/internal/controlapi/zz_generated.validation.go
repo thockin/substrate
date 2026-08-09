@@ -23,6 +23,7 @@ import (
 	context "context"
 
 	ateapipb "github.com/agent-substrate/substrate/pkg/proto/ateapipb"
+	fieldmaskpb "google.golang.org/protobuf/types/known/fieldmaskpb"
 	equality "k8s.io/apimachinery/pkg/api/equality"
 	operation "k8s.io/apimachinery/pkg/api/operation"
 	safe "k8s.io/apimachinery/pkg/api/safe"
@@ -723,7 +724,48 @@ func Validate_UpdateActorRequest(
 		errs = append(errs, fn(fldPath.Child("actor"), obj.Actor, oldVal, oldObj != nil)...)
 	}
 
-	// field ateapipb.UpdateActorRequest.UpdateMask has no validation
+	{ // field ateapipb.UpdateActorRequest.UpdateMask
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *fieldmaskpb.FieldMask,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if equality.Semantic.DeepEqual(obj, oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			// custom validation
+			if e := ValidateCustom_UpdateActorRequest_UpdateMask(ctx, op, fldPath, obj, oldObj); len(e) != 0 {
+				errs = append(errs, e...)
+			}
+			func() { // cohort = "paths"
+				if e := validate.Subfield(ctx, op, fldPath, obj, oldObj, "paths",
+					func(o *fieldmaskpb.FieldMask) []string { return o.Paths }, validate.SemanticDeepEqual,
+					func(ctx context.Context, op operation.Operation, fldPath *field.Path, obj, oldObj []string) field.ErrorList {
+						return validate.MinItems(ctx, op, fldPath, obj, oldObj, 1)
+					}); len(e) != 0 {
+					errs = append(errs, e...)
+				}
+			}()
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *ateapipb.UpdateActorRequest) *fieldmaskpb.FieldMask {
+				return oldObj.UpdateMask
+			})
+		errs = append(errs, fn(fldPath.Child("update_mask"), obj.UpdateMask, oldVal, oldObj != nil)...)
+	}
+
 	return errs
 }
 
