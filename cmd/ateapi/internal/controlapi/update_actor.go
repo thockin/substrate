@@ -24,6 +24,7 @@ import (
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/apimachinery/pkg/api/operation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
@@ -66,7 +67,11 @@ func (s *Service) UpdateActor(ctx context.Context, req *ateapipb.UpdateActorRequ
 }
 
 func validateUpdateActorRequest(ctx context.Context, req *ateapipb.UpdateActorRequest) field.ErrorList {
-	errs := req.Validate(ctx) // TODO: move to caller when all manual validation is removed.
+	// Call the generated validation.
+	op := operation.Operation{Type: operation.Update}
+	errs := Validate_UpdateActorRequest(ctx, op, nil, req, nil)
+
+	// TODO: remove when done with DV
 	errs = append(errs, validateUpdateMask(req.GetUpdateMask(), actorMutableFields)...)
 	return errs
 }

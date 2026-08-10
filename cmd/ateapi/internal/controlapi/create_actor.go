@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/operation"
 	"k8s.io/apimachinery/pkg/api/validate/content"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
@@ -139,8 +140,12 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
 
 func validateCreateActorRequest(ctx context.Context, req *ateapipb.CreateActorRequest) field.ErrorList {
 	var fldPath *field.Path
-	errs := req.Validate(ctx) // TODO: move to caller when all manual validation is removed.
 
+	// Call the generated validation.
+	op := operation.Operation{Type: operation.Create}
+	errs := Validate_CreateActorRequest(ctx, op, nil, req, nil)
+
+	// TODO: remove when done with DV
 	if val := req.GetSourceSnapshot(); val != nil {
 		if err := validateActorSnapshotRef(val, "source_snapshot"); err != nil {
 			errs = append(errs, field.Invalid(fldPath.Child("source_snapshot"), val, err.Error()))
