@@ -847,7 +847,8 @@ type Actor struct {
 	ActorTemplateNamespace string `protobuf:"bytes,2,opt,name=actor_template_namespace,json=actorTemplateNamespace,proto3" json:"actor_template_namespace,omitempty"`
 	// +k8s:required
 	// +k8s:format=k8s-long-name
-	ActorTemplateName    string     `protobuf:"bytes,3,opt,name=actor_template_name,json=actorTemplateName,proto3" json:"actor_template_name,omitempty"`
+	ActorTemplateName string `protobuf:"bytes,3,opt,name=actor_template_name,json=actorTemplateName,proto3" json:"actor_template_name,omitempty"`
+	// +k8s:opaqueType
 	ActorTemplateVersion *ObjectRef `protobuf:"bytes,13,opt,name=actor_template_version,json=actorTemplateVersion,proto3" json:"actor_template_version,omitempty"`
 	// status is the actor's current lifecycle state, set by the system.
 	// User-provided values are ignored.
@@ -1117,6 +1118,7 @@ type ActorSnapshot struct {
 	ContentScope           SnapshotContentScope `protobuf:"varint,8,opt,name=content_scope,json=contentScope,proto3,enum=ateapi.SnapshotContentScope" json:"content_scope,omitempty"`
 	SnapshotUri            string               `protobuf:"bytes,9,opt,name=snapshot_uri,json=snapshotUri,proto3" json:"snapshot_uri,omitempty"`
 	// Immutable reference to the actor_template_version where the snapshot was created from.
+	// +k8s:opaqueType
 	ActorTemplateVersion *ObjectRef `protobuf:"bytes,10,opt,name=actor_template_version,json=actorTemplateVersion,proto3" json:"actor_template_version,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
@@ -1548,10 +1550,12 @@ type isActorTemplateRef_Reference interface {
 }
 
 type ActorTemplateRef_ActorTemplateVersion struct {
+	// +k8s:opaqueType
 	ActorTemplateVersion *ObjectRef `protobuf:"bytes,1,opt,name=actor_template_version,json=actorTemplateVersion,proto3,oneof"`
 }
 
 type ActorTemplateRef_ActorTemplate struct {
+	// +k8s:opaqueType
 	ActorTemplate *ObjectRef `protobuf:"bytes,2,opt,name=actor_template,json=actorTemplate,proto3,oneof"`
 }
 
@@ -1569,6 +1573,7 @@ type ActorTemplate struct {
 	// default_version_on_create names the ActorTemplateVersion used by
 	// CreateActor calls that do not pin a version. If unset, CreateActor
 	// without an explicit version fails with FailedPrecondition.
+	// +k8s:opaqueType
 	DefaultVersionOnCreate *ObjectRef `protobuf:"bytes,3,opt,name=default_version_on_create,json=defaultVersionOnCreate,proto3" json:"default_version_on_create,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
@@ -1631,6 +1636,7 @@ type ActorTemplateVersion struct {
 	Metadata *ResourceMetadata `protobuf:"bytes,1,opt,name=metadata,proto3" json:"metadata,omitempty"`
 	// actor_template is the parent ActorTemplate. Required at creation and
 	// immutable.
+	// +k8s:opaqueType
 	ActorTemplate *ObjectRef `protobuf:"bytes,2,opt,name=actor_template,json=actorTemplate,proto3" json:"actor_template,omitempty"`
 	// worker_selector restricts which worker pools actors from this template
 	// may use.
@@ -1645,6 +1651,7 @@ type ActorTemplateVersion struct {
 	// golden_snapshot points at the ActorSnapshot, in the reserved ate-golden
 	// system atespace, built for this version by ate-api. Set once state is
 	// READY.
+	// +k8s:opaqueType
 	GoldenSnapshot *ObjectRef `protobuf:"bytes,8,opt,name=golden_snapshot,json=goldenSnapshot,proto3" json:"golden_snapshot,omitempty"`
 	// State machine, mirroring the ActorTemplateVersion CRD PhaseType:
 	// INITIAL -> RESUME_GOLDEN_ACTOR -> WAIT_GOLDEN_ACTOR -> {READY | FAILED}.
@@ -2987,8 +2994,9 @@ func (x *CreateActorTemplateRequest) GetActorTemplate() *ActorTemplate {
 }
 
 type GetActorTemplateRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ActorTemplate *ObjectRef             `protobuf:"bytes,1,opt,name=actor_template,json=actorTemplate,proto3" json:"actor_template,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// +k8s:opaqueType
+	ActorTemplate *ObjectRef `protobuf:"bytes,1,opt,name=actor_template,json=actorTemplate,proto3" json:"actor_template,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3042,6 +3050,8 @@ type UpdateActorTemplateRequest struct {
 	//
 	// Only the following fields are supported:
 	//   - default_version_on_create
+	//
+	// +k8s:opaqueType
 	UpdateMask    *fieldmaskpb.FieldMask `protobuf:"bytes,2,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3214,8 +3224,9 @@ func (x *ListActorTemplatesResponse) GetNextPageToken() string {
 }
 
 type DeleteActorTemplateRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ActorTemplate *ObjectRef             `protobuf:"bytes,1,opt,name=actor_template,json=actorTemplate,proto3" json:"actor_template,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// +k8s:opaqueType
+	ActorTemplate *ObjectRef `protobuf:"bytes,1,opt,name=actor_template,json=actorTemplate,proto3" json:"actor_template,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3305,8 +3316,9 @@ func (x *CreateActorTemplateVersionRequest) GetActorTemplateVersion() *ActorTemp
 }
 
 type GetActorTemplateVersionRequest struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	ActorTemplateVersion *ObjectRef             `protobuf:"bytes,1,opt,name=actor_template_version,json=actorTemplateVersion,proto3" json:"actor_template_version,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// +k8s:opaqueType
+	ActorTemplateVersion *ObjectRef `protobuf:"bytes,1,opt,name=actor_template_version,json=actorTemplateVersion,proto3" json:"actor_template_version,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -3352,6 +3364,7 @@ type ListActorTemplateVersionsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The parent ActorTemplate whose versions to list. An unset ref lists
 	// versions across all templates.
+	// +k8s:opaqueType
 	ActorTemplate *ObjectRef `protobuf:"bytes,1,opt,name=actor_template,json=actorTemplate,proto3" json:"actor_template,omitempty"`
 	// The atespace to list actor templates from. Empty lists across all
 	// atespaces.
@@ -3481,8 +3494,9 @@ func (x *ListActorTemplateVersionsResponse) GetNextPageToken() string {
 }
 
 type DeleteActorTemplateVersionRequest struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	ActorTemplateVersion *ObjectRef             `protobuf:"bytes,1,opt,name=actor_template_version,json=actorTemplateVersion,proto3" json:"actor_template_version,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// +k8s:opaqueType
+	ActorTemplateVersion *ObjectRef `protobuf:"bytes,1,opt,name=actor_template_version,json=actorTemplateVersion,proto3" json:"actor_template_version,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -3642,6 +3656,8 @@ type UpdateActorRequest struct {
 	//
 	// Only the following fields are supported:
 	//   - worker_selector
+	//
+	// +k8s:opaqueType
 	UpdateMask    *fieldmaskpb.FieldMask `protobuf:"bytes,2,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4240,6 +4256,8 @@ type UpdateActorSnapshotTagRequest struct {
 	//
 	// Only the following fields are supported:
 	//   - scope
+	//
+	// +k8s:opaqueType
 	UpdateMask    *fieldmaskpb.FieldMask `protobuf:"bytes,2,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

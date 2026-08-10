@@ -240,6 +240,7 @@ message Actor {
   // +k8s:format=k8s-long-name
   string actor_template_name = 3;
 
+  // +k8s:opaqueType
   ObjectRef actor_template_version = 13;
 
   enum Status {
@@ -342,6 +343,7 @@ message ActorSnapshot {
   SnapshotContentScope content_scope = 8;
   string snapshot_uri = 9;
   // Immutable reference to the actor_template_version where the snapshot was created from.
+  // +k8s:opaqueType
   ObjectRef actor_template_version = 10;
 }
 
@@ -394,7 +396,9 @@ enum SandboxClass {
 // Atespace-owned ActorTemplateVersion.
 message ActorTemplateRef {
   oneof reference {
+    // +k8s:opaqueType
     ObjectRef actor_template_version = 1;
+    // +k8s:opaqueType
     ObjectRef actor_template = 2;
   }
 }
@@ -409,6 +413,7 @@ message ActorTemplate {
   // default_version_on_create names the ActorTemplateVersion used by
   // CreateActor calls that do not pin a version. If unset, CreateActor
   // without an explicit version fails with FailedPrecondition.
+  // +k8s:opaqueType
   ObjectRef default_version_on_create = 3;
 
   // TODO: A "scope" field could be useful to allow global ActorTemplateVersion.
@@ -427,6 +432,7 @@ message ActorTemplateVersion {
 
   // actor_template is the parent ActorTemplate. Required at creation and
   // immutable.
+  // +k8s:opaqueType
   ObjectRef actor_template = 2;
 
   // worker_selector restricts which worker pools actors from this template
@@ -447,6 +453,7 @@ message ActorTemplateVersion {
   // golden_snapshot points at the ActorSnapshot, in the reserved ate-golden
   // system atespace, built for this version by ate-api. Set once state is
   // READY.
+  // +k8s:opaqueType
   ObjectRef golden_snapshot = 8;
 
   // State machine, mirroring the ActorTemplateVersion CRD PhaseType:
@@ -687,6 +694,7 @@ message CreateActorTemplateRequest {
 }
 
 message GetActorTemplateRequest {
+  // +k8s:opaqueType
   ObjectRef actor_template = 1;
 }
 
@@ -702,6 +710,7 @@ message UpdateActorTemplateRequest {
   //
   // Only the following fields are supported:
   //   - default_version_on_create
+  // +k8s:opaqueType
   google.protobuf.FieldMask update_mask = 2;
 }
 
@@ -730,6 +739,7 @@ message ListActorTemplatesResponse {
 }
 
 message DeleteActorTemplateRequest {
+  // +k8s:opaqueType
   ObjectRef actor_template = 1;
 }
 
@@ -741,12 +751,14 @@ message CreateActorTemplateVersionRequest {
 }
 
 message GetActorTemplateVersionRequest {
+  // +k8s:opaqueType
   ObjectRef actor_template_version = 1;
 }
 
 message ListActorTemplateVersionsRequest {
   // The parent ActorTemplate whose versions to list. An unset ref lists
   // versions across all templates.
+  // +k8s:opaqueType
   ObjectRef actor_template = 1;
 
   // The atespace to list actor templates from. Empty lists across all
@@ -773,6 +785,7 @@ message ListActorTemplateVersionsResponse {
 }
 
 message DeleteActorTemplateVersionRequest {
+  // +k8s:opaqueType
   ObjectRef actor_template_version = 1;
 }
 
@@ -808,6 +821,7 @@ message UpdateActorRequest {
   //
   // Only the following fields are supported:
   //   - worker_selector
+  // +k8s:opaqueType
   google.protobuf.FieldMask update_mask = 2;
 }
 
@@ -880,6 +894,7 @@ message UpdateActorSnapshotTagRequest {
   //
   // Only the following fields are supported:
   //   - scope
+  // +k8s:opaqueType
   google.protobuf.FieldMask update_mask = 2;
 }
 

@@ -24,11 +24,12 @@ import (
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/apimachinery/pkg/api/operation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
 func (s *Service) CreateAtespace(ctx context.Context, req *ateapipb.CreateAtespaceRequest) (*ateapipb.Atespace, error) {
-	if errs := req.Validate(ctx); len(errs) > 0 {
+	if errs := validateCreateAtespaceRequest(ctx, req); len(errs) > 0 {
 		return nil, toGRPCStatusError(errs)
 	}
 
@@ -47,6 +48,12 @@ func (s *Service) CreateAtespace(ctx context.Context, req *ateapipb.CreateAtespa
 	}
 
 	return stored, nil
+}
+
+func validateCreateAtespaceRequest(ctx context.Context, req *ateapipb.CreateAtespaceRequest) field.ErrorList {
+	// Call the generated validation.
+	op := operation.Operation{Type: operation.Create}
+	return Validate_CreateAtespaceRequest(ctx, op, nil, req, nil)
 }
 
 func (s *Service) GetAtespace(ctx context.Context, req *ateapipb.GetAtespaceRequest) (*ateapipb.Atespace, error) {
