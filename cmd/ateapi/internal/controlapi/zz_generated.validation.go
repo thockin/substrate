@@ -686,6 +686,56 @@ func Validate_Selector(
 	return errs
 }
 
+// Validate_UpdateActorRequest validates an instance of UpdateActorRequest according
+// to declarative validation rules in the API schema.
+func Validate_UpdateActorRequest(
+	ctx context.Context, op operation.Operation, fldPath *field.Path,
+	obj, oldObj *ateapipb.UpdateActorRequest) (errs field.ErrorList) {
+
+	{ // field ateapipb.UpdateActorRequest.Actor
+		fn := func(
+			fldPath *field.Path,
+			obj, oldObj *ateapipb.Actor,
+			oldValueCorrelated bool) (errs field.ErrorList) {
+			// don't revalidate unchanged data
+			if oldValueCorrelated && op.Type == operation.Update {
+				if equality.Semantic.DeepEqual(obj, oldObj) {
+					return nil
+				}
+			}
+			// call field-attached validations
+			earlyReturn := false
+			if e := validate.RequiredPointer(ctx, op, fldPath, obj, oldObj).MarkShortCircuit(); len(e) != 0 {
+				errs = append(errs, e...)
+				earlyReturn = true
+			}
+			if earlyReturn {
+				return // do not proceed
+			}
+			func() { // cohort = "metadata"
+				earlyReturn := false
+				if e := validate.Subfield(ctx, op, fldPath, obj, oldObj, "metadata",
+					func(o *ateapipb.Actor) *ateapipb.ResourceMetadata { return o.Metadata }, validate.SemanticDeepEqual, validate.RequiredPointer).MarkShortCircuit(); len(e) != 0 {
+					errs = append(errs, e...)
+					earlyReturn = true
+				}
+				if earlyReturn {
+					return // do not proceed
+				}
+			}()
+			return
+		}
+		oldVal := safe.Field(oldObj,
+			func(oldObj *ateapipb.UpdateActorRequest) *ateapipb.Actor {
+				return oldObj.Actor
+			})
+		errs = append(errs, fn(fldPath.Child("actor"), obj.Actor, oldVal, oldObj != nil)...)
+	}
+
+	// field ateapipb.UpdateActorRequest.UpdateMask has no validation
+	return errs
+}
+
 // Validate_WorkerAssignment validates an instance of WorkerAssignment according
 // to declarative validation rules in the API schema.
 func Validate_WorkerAssignment(

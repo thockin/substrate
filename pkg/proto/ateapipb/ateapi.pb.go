@@ -1671,7 +1671,10 @@ type UpdateActorRequest struct {
 	// actor.metadata.version and actor.metadata.uid are optional preconditions and
 	// zero values skip the check.
 	//
-	// +k8s:opaqueType
+	// +k8s:required
+	// +k8s:opaqueType # updates are patch-like and can be sparse
+	// +k8s:subfield(metadata)=+k8s:required
+	// TODO: When nested subfields are enabled, use that for actor.metadata.atespace
 	Actor *Actor `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
 	// The set of fields to update. Required.
 	//

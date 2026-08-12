@@ -148,7 +148,7 @@ func TestValidateUpdateActorRequest(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assertValidateErr(t, validateUpdateActorRequest(tt.req), tt.want)
+			assertValidateErr(t, validateUpdateActorRequest(context.Background(), tt.req), tt.want)
 		})
 	}
 }

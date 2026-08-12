@@ -24,6 +24,7 @@ import (
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/apimachinery/pkg/api/operation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
@@ -34,7 +35,7 @@ var actorMutableFields = mutableFields[*ateapipb.Actor]{
 }
 
 func (s *Service) UpdateActor(ctx context.Context, req *ateapipb.UpdateActorRequest) (*ateapipb.Actor, error) {
-	if errs := validateUpdateActorRequest(req); len(errs) > 0 {
+	if errs := validateUpdateActorRequest(ctx, req); len(errs) > 0 {
 		return nil, toGRPCStatusError(errs)
 	}
 	in := req.GetActor()
@@ -65,14 +66,19 @@ func (s *Service) UpdateActor(ctx context.Context, req *ateapipb.UpdateActorRequ
 	return updated, nil
 }
 
-func validateUpdateActorRequest(req *ateapipb.UpdateActorRequest) field.ErrorList {
+func validateUpdateActorRequest(ctx context.Context, req *ateapipb.UpdateActorRequest) field.ErrorList {
+	// We model this as a create rather than an update because updates assume a
+	// "current" value, which is not true for the Update*Request types.
+	op := operation.Operation{Type: operation.Create}
+	errs := Validate_UpdateActorRequest(ctx, op, nil, req, nil)
+
 	var fldPath *field.Path
-	var errs field.ErrorList
 
 	actor := req.GetActor()
 	actorPath := fldPath.Child("actor")
 	if actor == nil {
-		return field.ErrorList{field.Required(actorPath, "")}
+		// handled by DV
+		return errs
 	}
 
 	errs = append(errs, resources.ValidateResourceMetadataRef(actor.GetMetadata(), actorPath.Child("metadata"))...)
