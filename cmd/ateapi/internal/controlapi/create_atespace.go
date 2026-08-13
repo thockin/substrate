@@ -38,7 +38,7 @@ func (s *Service) CreateAtespace(ctx context.Context, req *ateapipb.CreateAtespa
 			Name: name,
 		},
 	}
-	stored, err := s.persistence.CreateAtespace(ctx, atespace)
+	stored, err := s.impl.CreateAtespace(ctx, atespace)
 	if err != nil {
 		if errors.Is(err, store.ErrAlreadyExists) {
 			return nil, status.Errorf(codes.AlreadyExists, "Atespace %s already exists", name)

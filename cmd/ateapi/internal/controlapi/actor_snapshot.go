@@ -69,7 +69,7 @@ func (s *Service) ListActorSnapshots(ctx context.Context, req *ateapipb.ListActo
 	if len(errs) > 0 {
 		return nil, status.Error(codes.InvalidArgument, errs.ToAggregate().Error())
 	}
-	snapshots, nextToken, err := s.persistence.ListActorSnapshots(ctx, req.GetAtespace(), effectivePageSize(req.GetPageSize()), req.GetPageToken())
+	snapshots, nextToken, err := s.impl.ListActorSnapshots(ctx, req.GetAtespace(), effectivePageSize(req.GetPageSize()), req.GetPageToken())
 	if err != nil {
 		return nil, fmt.Errorf("while listing actor snapshots: %w", err)
 	}
@@ -91,7 +91,7 @@ func (s *Service) TagActorSnapshot(ctx context.Context, req *ateapipb.TagActorSn
 	if req.GetTag().GetMetadata().GetAtespace() != ref.GetAtespace() {
 		return nil, status.Error(codes.FailedPrecondition, "ActorSnapshot tags must belong to the snapshot's Atespace")
 	}
-	atespaceLock, err := s.persistence.AcquireLock(lock.Context(), "lock:atespace:"+req.GetTag().GetMetadata().GetAtespace())
+	atespaceLock, err := s.impl.AcquireLock(lock.Context(), "lock:atespace:"+req.GetTag().GetMetadata().GetAtespace())
 	if errors.Is(err, store.ErrLockConflict) {
 		return nil, status.Error(codes.Aborted, "another operation is using this Atespace")
 	}
@@ -99,14 +99,14 @@ func (s *Service) TagActorSnapshot(ctx context.Context, req *ateapipb.TagActorSn
 		return nil, fmt.Errorf("while locking tag Atespace: %w", err)
 	}
 	defer atespaceLock.Close()
-	exists, err := s.persistence.AtespaceExists(atespaceLock.Context(), req.GetTag().GetMetadata().GetAtespace())
+	exists, err := s.impl.AtespaceExists(atespaceLock.Context(), req.GetTag().GetMetadata().GetAtespace())
 	if err != nil {
 		return nil, fmt.Errorf("while checking tag Atespace: %w", err)
 	}
 	if !exists {
 		return nil, status.Errorf(codes.FailedPrecondition, "Atespace %s not found", req.GetTag().GetMetadata().GetAtespace())
 	}
-	tag, err := s.persistence.TagActorSnapshot(atespaceLock.Context(), ref.GetAtespace(), ref.GetName(), req.GetTag())
+	tag, err := s.impl.TagActorSnapshot(atespaceLock.Context(), ref.GetAtespace(), ref.GetName(), req.GetTag())
 	if errors.Is(err, store.ErrAlreadyExists) {
 		return nil, status.Errorf(codes.AlreadyExists, "ActorSnapshot tag %s/%s already exists", req.GetTag().GetMetadata().GetAtespace(), req.GetTag().GetMetadata().GetName())
 	}
@@ -128,7 +128,7 @@ func (s *Service) UpdateActorSnapshotTag(ctx context.Context, req *ateapipb.Upda
 	}
 	in := req.GetTag()
 	atespace, name := in.GetMetadata().GetAtespace(), in.GetMetadata().GetName()
-	_, current, err := s.persistence.GetActorSnapshotByTag(ctx, atespace, name)
+	_, current, err := s.impl.GetActorSnapshotByTag(ctx, atespace, name)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "ActorSnapshot tag %s/%s not found", atespace, name)
 	}
@@ -148,7 +148,7 @@ func (s *Service) UpdateActorSnapshotTag(ctx context.Context, req *ateapipb.Upda
 
 	applyUpdateMask(current, in, req.GetUpdateMask(), actorSnapshotTagMutableFields)
 
-	updatedTag, err := s.persistence.UpdateActorSnapshotTag(ctx, atespace, name, current.GetScope(), expectedVersion)
+	updatedTag, err := s.impl.UpdateActorSnapshotTag(ctx, atespace, name, current.GetScope(), expectedVersion)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "ActorSnapshot tag %s/%s not found", atespace, name)
 	}
@@ -192,7 +192,7 @@ func (s *Service) DeleteActorSnapshotTag(ctx context.Context, req *ateapipb.Dele
 		return nil, err
 	}
 	defer lock.Close()
-	tag, err := s.persistence.DeleteActorSnapshotTag(lock.Context(), req.GetTag().GetAtespace(), req.GetTag().GetName())
+	tag, err := s.impl.DeleteActorSnapshotTag(lock.Context(), req.GetTag().GetAtespace(), req.GetTag().GetName())
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "ActorSnapshot tag %s/%s not found", req.GetTag().GetAtespace(), req.GetTag().GetName())
 	}
@@ -209,9 +209,9 @@ func (s *Service) getActorSnapshot(ctx context.Context, ref *ateapipb.ActorSnaps
 	switch ref.GetReference().(type) {
 	case *ateapipb.ActorSnapshotRef_Snapshot:
 		canonical := ref.GetSnapshot()
-		snapshot, err = s.persistence.GetActorSnapshot(ctx, canonical.GetAtespace(), canonical.GetName())
+		snapshot, err = s.impl.GetActorSnapshot(ctx, canonical.GetAtespace(), canonical.GetName())
 	case *ateapipb.ActorSnapshotRef_Tag:
-		snapshot, tag, err = s.persistence.GetActorSnapshotByTag(ctx, ref.GetTag().GetAtespace(), ref.GetTag().GetName())
+		snapshot, tag, err = s.impl.GetActorSnapshotByTag(ctx, ref.GetTag().GetAtespace(), ref.GetTag().GetName())
 	default:
 		return nil, nil, nil, store.ErrNotFound
 	}
@@ -230,7 +230,7 @@ func (s *Service) lockActorSnapshot(ctx context.Context, ref *ateapipb.ActorSnap
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("while getting actor snapshot: %w", err)
 	}
-	lock, err := s.persistence.AcquireLock(ctx, "lock:actor-snapshot:"+canonical.GetAtespace()+":"+canonical.GetName())
+	lock, err := s.impl.AcquireLock(ctx, "lock:actor-snapshot:"+canonical.GetAtespace()+":"+canonical.GetName())
 	if errors.Is(err, store.ErrLockConflict) {
 		return nil, nil, nil, nil, status.Error(codes.Aborted, "another operation is using this ActorSnapshot")
 	}

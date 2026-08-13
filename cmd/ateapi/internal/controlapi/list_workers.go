@@ -27,7 +27,7 @@ func (s *Service) ListWorkers(ctx context.Context, req *ateapipb.ListWorkersRequ
 		return nil, toGRPCStatusError(errs)
 	}
 
-	workers, nextToken, err := s.persistence.ListWorkers(ctx, effectivePageSize(req.GetPageSize()), req.GetPageToken())
+	workers, nextToken, err := s.impl.ListWorkers(ctx, effectivePageSize(req.GetPageSize()), req.GetPageToken())
 	if err != nil {
 		return nil, fmt.Errorf("while listing workers in db: %w", err)
 	}

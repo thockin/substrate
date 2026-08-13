@@ -42,7 +42,9 @@ func (s *Service) UpdateActor(ctx context.Context, req *ateapipb.UpdateActorRequ
 	actorRef := resources.ActorRefFromActor(in)
 	setSpanActorRefAttributes(ctx, actorRef)
 
-	updated, err := s.persistence.UpdateActor(ctx, actorRef, func(dbActor *ateapipb.Actor) error {
+	//FIXME: it makes sense to call store from here but not from all the other
+	//places -- we need to pass through this layer
+	updated, err := s.impl.UpdateActor(ctx, actorRef, func(dbActor *ateapipb.Actor) error {
 		if err := store.CheckActorPrecondition(dbActor, in.GetMetadata().GetUid(), in.GetMetadata().GetVersion()); err != nil {
 			return err
 		}

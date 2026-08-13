@@ -293,7 +293,7 @@ func TestUpdateActor_DeleteRecreateRace(t *testing.T) {
 			}
 		},
 	}
-	svc := &Service{persistence: racing}
+	svc := &Service{impl: racing}
 
 	// The client asserts "only update the actor with uid A".
 	_, err = svc.UpdateActor(ctx, &ateapipb.UpdateActorRequest{
@@ -364,7 +364,7 @@ func TestUpdateActor_ConcurrentDisjointUpdates(t *testing.T) {
 			}
 		},
 	}
-	svc := &Service{persistence: racing}
+	svc := &Service{impl: racing}
 
 	// Update operation is changing the worker_selector field, not the actor's status (like the concurrent op)
 	if _, err := svc.UpdateActor(ctx, &ateapipb.UpdateActorRequest{
@@ -401,5 +401,5 @@ func serviceWithActor(t *testing.T, actor *ateapipb.Actor) (*Service, *ateapipb.
 	if err != nil {
 		t.Fatalf("Failed to CreateActor: %v", err)
 	}
-	return &Service{persistence: persistence}, created
+	return &Service{impl: persistence}, created
 }

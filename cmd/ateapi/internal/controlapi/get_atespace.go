@@ -33,7 +33,7 @@ func (s *Service) GetAtespace(ctx context.Context, req *ateapipb.GetAtespaceRequ
 	}
 
 	name := req.GetAtespace().GetName()
-	atespace, err := s.persistence.GetAtespace(ctx, name)
+	atespace, err := s.impl.GetAtespace(ctx, name)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "Atespace %s not found", name)
 	} else if err != nil {

@@ -100,7 +100,7 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
 	name := in.GetMetadata().GetName()
 
 	// The atespace must already exist.
-	exists, err := s.persistence.AtespaceExists(ctx, atespace)
+	exists, err := s.impl.AtespaceExists(ctx, atespace)
 	if err != nil {
 		return nil, fmt.Errorf("while checking atespace: %w", err)
 	}
@@ -126,7 +126,7 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
 		ActorVolumes:           initVols,
 		LatestSnapshot:         sourceSnapshotRef,
 	}
-	stored, err := s.persistence.CreateActor(ctx, actor)
+	stored, err := s.impl.CreateActor(ctx, actor)
 	if err != nil {
 		if errors.Is(err, store.ErrAlreadyExists) {
 			return nil, status.Errorf(codes.AlreadyExists, "Actor %s already exists", name)

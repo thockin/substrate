@@ -146,7 +146,7 @@ func (w *ActorWorkflow) loadActorForResume(ctx context.Context, actorRef resourc
 	defer func() { err = done(err) }()
 
 	var src resumeSnapshotSource
-	actor, err := w.store.GetActor(ctx, actorRef)
+	actor, err := w.impl.GetActor(ctx, actorRef)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, nil, src, status.Errorf(codes.NotFound, "Actor %s not found", actorRef)
@@ -166,7 +166,7 @@ func (w *ActorWorkflow) loadActorForResume(ctx context.Context, actorRef resourc
 		return nil, nil, src, fmt.Errorf("while getting ActorTemplate: %w", err)
 	}
 	if ref := actor.GetLatestSnapshot(); ref != nil {
-		snapshot, err := w.store.GetActorSnapshot(ctx, ref.GetAtespace(), ref.GetName())
+		snapshot, err := w.impl.GetActorSnapshot(ctx, ref.GetAtespace(), ref.GetName())
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, nil, src, status.Error(codes.DataLoss, "ActorSnapshot data is missing")
 		}
@@ -178,7 +178,7 @@ func (w *ActorWorkflow) loadActorForResume(ctx context.Context, actorRef resourc
 		}
 		src.Scope = snapshot.GetContentScope()
 	} else if actorTemplate.Status.GoldenSnapshot != "" && !boot {
-		snapshot, err := w.store.GetActorSnapshot(ctx, resources.GoldenActorAtespace, actorTemplate.Status.GoldenSnapshot)
+		snapshot, err := w.impl.GetActorSnapshot(ctx, resources.GoldenActorAtespace, actorTemplate.Status.GoldenSnapshot)
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, nil, src, status.Error(codes.DataLoss, "ActorTemplate golden snapshot data is missing")
 		}
@@ -213,7 +213,7 @@ func (w *ActorWorkflow) loadActorForResume(ctx context.Context, actorRef resourc
 			if actorTemplate.Status.GoldenSnapshot == "" {
 				return nil, nil, src, status.Error(codes.FailedPrecondition, "a Golden data resume requires the ActorTemplate golden snapshot, which is not available")
 			}
-			goldenSnapshot, err := w.store.GetActorSnapshot(ctx, resources.GoldenActorAtespace, actorTemplate.Status.GoldenSnapshot)
+			goldenSnapshot, err := w.impl.GetActorSnapshot(ctx, resources.GoldenActorAtespace, actorTemplate.Status.GoldenSnapshot)
 			if errors.Is(err, store.ErrNotFound) {
 				return nil, nil, src, status.Error(codes.DataLoss, "ActorTemplate golden snapshot data is missing")
 			}
@@ -263,12 +263,12 @@ func (w *ActorWorkflow) ensureVolumesCreated(ctx context.Context, actorRef resou
 	}
 	if createErr != nil {
 		// Even if volume creation failed, we still want to persist any updated volume state.
-		if _, updateErr := w.store.UpdateActor(ctx, actorRef, persistVolumes); updateErr != nil {
+		if _, updateErr := w.impl.UpdateActor(ctx, actorRef, persistVolumes); updateErr != nil {
 			slog.ErrorContext(ctx, "failed to update actor volumes on volume creation failure in resume", slog.Any("error", updateErr))
 		}
 		return nil, createErr
 	}
-	updated, updateErr := w.store.UpdateActor(ctx, actorRef, persistVolumes)
+	updated, updateErr := w.impl.UpdateActor(ctx, actorRef, persistVolumes)
 	if updateErr != nil {
 		if errors.Is(updateErr, store.ErrVersionConflict) {
 			return nil, status.Error(codes.Aborted, "concurrent update conflict, please retry")
@@ -347,17 +347,17 @@ func (w *ActorWorkflow) validateAssignedWorker(ctx context.Context, actorRef res
 		slog.ErrorContext(ctx, "expected a worker assignment on a RESUMING actor, found none")
 
 		// Crash the actor if its worker assignment is missing. We should never be in this state.
-		if cerr := crashActor(ctx, w.store, actorRef, ateattr.OperationResume, ateattr.ReasonCorruptedAssignment); cerr != nil {
+		if cerr := crashActor(ctx, w.impl, actorRef, ateattr.OperationResume, ateattr.ReasonCorruptedAssignment); cerr != nil {
 			return nil, cerr
 		}
 		return nil, status.Errorf(codes.Aborted, "actor %s crashed", actorRef)
 	}
 
-	worker, err := w.store.GetWorker(ctx, assignment.GetWorkerNamespace(), assignment.GetWorkerPool(), assignment.GetWorkerPod())
+	worker, err := w.impl.GetWorker(ctx, assignment.GetWorkerNamespace(), assignment.GetWorkerPool(), assignment.GetWorkerPod())
 	if err != nil {
 		// Crash the actor if it was assigned to a deleted pod.
 		if errors.Is(err, store.ErrNotFound) {
-			if cerr := crashActor(ctx, w.store, actorRef, ateattr.OperationResume, ateattr.ReasonWorkerPodGone); cerr != nil {
+			if cerr := crashActor(ctx, w.impl, actorRef, ateattr.OperationResume, ateattr.ReasonWorkerPodGone); cerr != nil {
 				return nil, cerr
 			}
 			return nil, status.Errorf(codes.Aborted, "actor %s crashed", actorRef)
@@ -368,7 +368,7 @@ func (w *ActorWorkflow) validateAssignedWorker(ctx context.Context, actorRef res
 		slog.InfoContext(ctx, "Assigned worker is draining; crashing actor",
 			slog.String("actor", actorRef.String()),
 			slog.String("worker", worker.GetWorkerNamespace()+"/"+worker.GetWorkerPod()))
-		if cerr := crashActor(ctx, w.store, actorRef, ateattr.OperationResume, ateattr.ReasonWorkerReassigned); cerr != nil {
+		if cerr := crashActor(ctx, w.impl, actorRef, ateattr.OperationResume, ateattr.ReasonWorkerReassigned); cerr != nil {
 			return nil, cerr
 		}
 		return nil, status.Errorf(codes.Aborted, "actor %s crashed", actorRef.String())
@@ -378,7 +378,7 @@ func (w *ActorWorkflow) validateAssignedWorker(ctx context.Context, actorRef res
 		slog.ErrorContext(ctx, "crashing actor because its assigned worker no longer belongs to it",
 			slog.String("worker", worker.GetWorkerPod()),
 			slog.Any("assignment", worker.GetAssignment()))
-		if cerr := crashActor(ctx, w.store, actorRef, ateattr.OperationResume, ateattr.ReasonWorkerReassigned); cerr != nil {
+		if cerr := crashActor(ctx, w.impl, actorRef, ateattr.OperationResume, ateattr.ReasonWorkerReassigned); cerr != nil {
 			return nil, fmt.Errorf("while crashing actor: %w", cerr)
 		}
 		return nil, status.Errorf(codes.Aborted, "actor %s crashed", actorRef)
@@ -395,10 +395,10 @@ func (w *ActorWorkflow) validateAssignedWorker(ctx context.Context, actorRef res
 		// worker_selector was updated after the failed attempt), release it back
 		// to the free pool instead of leaving it claimed forever — nothing else
 		// reclaims a healthy worker whose actor moved on to a different pool.
-		if err := w.store.UpdateWorker(ctx, release, release.Version); err != nil {
+		if err := w.impl.UpdateWorker(ctx, release, release.Version); err != nil {
 			return nil, fmt.Errorf("while releasing stale worker assignment: %w", err)
 		}
-		if cerr := crashActor(ctx, w.store, actorRef, ateattr.OperationResume, ateattr.ReasonCorruptedAssignment); cerr != nil {
+		if cerr := crashActor(ctx, w.impl, actorRef, ateattr.OperationResume, ateattr.ReasonCorruptedAssignment); cerr != nil {
 			return nil, fmt.Errorf("while crashing actor: %w", cerr)
 		}
 		return nil, status.Errorf(codes.Aborted, "actor %s crashed", actorRef)
@@ -470,7 +470,7 @@ func (w *ActorWorkflow) assignWorkerAttempt(ctx context.Context, actorRef resour
 		go func(release *ateapipb.Worker) {
 			bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			if err := w.store.UpdateWorker(bgCtx, release, release.Version); err != nil {
+			if err := w.impl.UpdateWorker(bgCtx, release, release.Version); err != nil {
 				slog.ErrorContext(bgCtx, "Failed to release stale worker assignment",
 					slog.String("worker", release.GetWorkerNamespace()+"/"+release.GetWorkerPod()),
 					slog.Any("err", err))
@@ -506,12 +506,12 @@ func (w *ActorWorkflow) assignWorkerAttempt(ctx context.Context, actorRef resour
 		ActorUid: actor.GetMetadata().GetUid(),
 	}
 
-	if err := w.store.UpdateWorker(ctx, assignedWorker, assignedWorker.Version); err != nil {
+	if err := w.impl.UpdateWorker(ctx, assignedWorker, assignedWorker.Version); err != nil {
 		return nil, nil, err
 	}
 
 	newAssignment := workerAssignmentFrom(assignedWorker)
-	updatedActor, err := w.store.UpdateActor(ctx, actorRef, func(dbActor *ateapipb.Actor) error {
+	updatedActor, err := w.impl.UpdateActor(ctx, actorRef, func(dbActor *ateapipb.Actor) error {
 		if err := store.CheckActorPrecondition(dbActor, actor.GetMetadata().GetUid(), actor.GetMetadata().GetVersion()); err != nil {
 			return err
 		}
@@ -524,7 +524,7 @@ func (w *ActorWorkflow) assignWorkerAttempt(ctx context.Context, actorRef resour
 			return nil, nil, err
 		}
 		// refresh the version of actor to avoid always failure in rest retries.
-		fresh, gerr := w.store.GetActor(ctx, actorRef)
+		fresh, gerr := w.impl.GetActor(ctx, actorRef)
 		if gerr != nil {
 			slog.WarnContext(ctx, "Failed to refresh actor after assignment conflict", slog.Any("err", gerr))
 			return nil, nil, err
@@ -651,7 +651,7 @@ func (w *ActorWorkflow) ensureAteletRestored(ctx context.Context, actorRef resou
 		tele.WireSnapshotScope = ateattr.SnapshotScopeValue(req.Scope)
 
 		_, err = client.Restore(ctx, req)
-		return tele, maybeCrashActor(ctx, w.store, actorRef, err, "while restoring workload", ateattr.OperationResume)
+		return tele, maybeCrashActor(ctx, w.impl, actorRef, err, "while restoring workload", ateattr.OperationResume)
 	} else if !src.SnapshotURI.IsZero() {
 		slog.InfoContext(ctx, "Actor has durable snapshot; Restoring from snapshot")
 		// Mirrors loadActorForResume's source resolution: the durable URI is
@@ -689,7 +689,7 @@ func (w *ActorWorkflow) ensureAteletRestored(ctx context.Context, actorRef resou
 			EgressGateway:     egressGateway,
 		}
 		_, err = client.Restore(ctx, req)
-		return tele, maybeCrashActor(ctx, w.store, actorRef, err, "while restoring durable snapshot", ateattr.OperationResume)
+		return tele, maybeCrashActor(ctx, w.impl, actorRef, err, "while restoring durable snapshot", ateattr.OperationResume)
 	} else {
 		slog.InfoContext(ctx, "Actor has no snapshot; ActorTemplate has no golden snapshot; Booting from ActorTemplate spec")
 		tele.SnapshotKind = ateattr.SnapshotKindBoot
@@ -714,7 +714,7 @@ func (w *ActorWorkflow) ensureAteletRestored(ctx context.Context, actorRef resou
 			EgressGateway:          egressGateway,
 		}
 		_, err = client.Run(ctx, req)
-		return tele, maybeCrashActor(ctx, w.store, actorRef, err, "while creating workload from spec", ateattr.OperationResume)
+		return tele, maybeCrashActor(ctx, w.impl, actorRef, err, "while creating workload from spec", ateattr.OperationResume)
 	}
 }
 
@@ -730,12 +730,12 @@ func (w *ActorWorkflow) finalizeRunning(ctx context.Context, actorRef resources.
 	ctx, done := stepSpan(ctx, "FinalizeRunning")
 	defer func() { err = done(err) }()
 
-	latestActor, err := w.store.GetActor(ctx, actorRef)
+	latestActor, err := w.impl.GetActor(ctx, actorRef)
 	if err != nil {
 		return nil, err
 	}
 
-	updatedActor, err := w.store.UpdateActor(ctx, actorRef, func(dbActor *ateapipb.Actor) error {
+	updatedActor, err := w.impl.UpdateActor(ctx, actorRef, func(dbActor *ateapipb.Actor) error {
 		if err := store.CheckActorPrecondition(dbActor, latestActor.GetMetadata().GetUid(), latestActor.GetMetadata().GetVersion()); err != nil {
 			return err
 		}

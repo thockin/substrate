@@ -52,7 +52,7 @@ func (w *ActorWorkflow) loadActorForDelete(ctx context.Context, actorRef resourc
 	ctx, done := stepSpan(ctx, "LoadActorForDelete")
 	defer func() { err = done(err) }()
 
-	actor, err := w.store.GetActor(ctx, actorRef)
+	actor, err := w.impl.GetActor(ctx, actorRef)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Errorf(codes.NotFound, "Actor %s not found", actorRef)
@@ -78,7 +78,10 @@ func (w *ActorWorkflow) ensureMarkedDeleting(ctx context.Context, actorRef resou
 		return nil, status.Errorf(codes.FailedPrecondition, "Actor %s is not in a deletable status (status: %v)", actorRef, actor.GetStatus())
 	}
 
-	updated, err := w.store.UpdateActor(ctx, actorRef, func(dbActor *ateapipb.Actor) error {
+	//FIXME: does it make sense to call store here directly?  Status is not
+	//externally updatable, so it does not make sense to go through
+	//UpdateActorRequest, but this forces update validaton into the storage layer?
+	updated, err := w.impl.UpdateActor(ctx, actorRef, func(dbActor *ateapipb.Actor) error {
 		if err := store.CheckActorPrecondition(dbActor, actor.GetMetadata().GetUid(), actor.GetMetadata().GetVersion()); err != nil {
 			return err
 		}
@@ -115,13 +118,13 @@ func (w *ActorWorkflow) finalizeDeleted(ctx context.Context, actorRef resources.
 	ctx, done := stepSpan(ctx, "FinalizeDeleted")
 	defer func() { err = done(err) }()
 
-	deleted, err := w.store.DeleteActor(ctx, actorRef)
+	deleted, err := w.impl.DeleteActor(ctx, actorRef)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Errorf(codes.NotFound, "Actor %s not found", actorRef)
 		}
 		if errors.Is(err, store.ErrFailedPrecondition) {
-			current, getErr := w.store.GetActor(ctx, actorRef)
+			current, getErr := w.impl.GetActor(ctx, actorRef)
 			if getErr == nil {
 				return nil, status.Errorf(codes.FailedPrecondition, "Actor %s is not in a deletable status (status: %v)", actorRef, current.GetStatus())
 			}

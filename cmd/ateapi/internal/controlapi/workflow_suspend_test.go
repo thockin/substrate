@@ -44,7 +44,7 @@ func TestEnsureMarkedSuspending_SnapshotName(t *testing.T) {
 	tmpl := &atev1alpha1.ActorTemplate{Spec: atev1alpha1.ActorTemplateSpec{
 		SnapshotsConfig: atev1alpha1.SnapshotsConfig{Location: "gs://bucket/root/"},
 	}}
-	w := &ActorWorkflow{store: persistence}
+	w := &ActorWorkflow{impl: persistence}
 	marked, err := w.ensureMarkedSuspending(ctx, resources.ActorRef{Atespace: "team-a", Name: "actor-1"}, actor, tmpl)
 	if err != nil {
 		t.Fatalf("ensureMarkedSuspending: %v", err)
@@ -83,7 +83,7 @@ func TestEnsureMarkedSuspending_ReentryKeepsPersistedSnapshotLocation(t *testing
 	if err != nil {
 		t.Fatalf("CreateActor: %v", err)
 	}
-	w := &ActorWorkflow{store: persistence}
+	w := &ActorWorkflow{impl: persistence}
 	marked, err := w.ensureMarkedSuspending(ctx, resources.ActorRef{Atespace: "team-a", Name: "actor-1"}, actor, &atev1alpha1.ActorTemplate{})
 	if err != nil {
 		t.Fatalf("ensureMarkedSuspending: %v", err)
@@ -173,7 +173,7 @@ func TestEnsureMarkedSuspending_StatusMatrix(t *testing.T) {
 	for _, seedStatus := range allActorStatuses {
 		ctx := context.Background()
 		persistence := newTestPersistence(t)
-		w := &ActorWorkflow{store: persistence}
+		w := &ActorWorkflow{impl: persistence}
 
 		actorRef := resources.ActorRef{Atespace: "team-a", Name: "id1"}
 		actor, err := persistence.CreateActor(ctx, &ateapipb.Actor{
@@ -277,7 +277,7 @@ func TestEnsureAteletSuspended_DanglingWorkerDoesNotRecordPhantomSnapshot(t *tes
 				t.Fatalf("CreateActor: %v", err)
 			}
 
-			w := &ActorWorkflow{store: persistence, dialer: newDanglingDialer()}
+			w := &ActorWorkflow{impl: persistence, dialer: newDanglingDialer()}
 			if _, err := w.ensureAteletSuspended(ctx, resources.ActorRef{Atespace: "team-a", Name: "actor-1"}, created, &atev1alpha1.ActorTemplate{}); err == nil {
 				t.Fatal("ensureAteletSuspended: want error for dangling worker, got nil")
 			}
@@ -329,7 +329,7 @@ func TestEnsureSuspendedFinalized_NoAssignment(t *testing.T) {
 		t.Fatalf("CreateActor: %v", err)
 	}
 
-	w := &ActorWorkflow{store: persistence}
+	w := &ActorWorkflow{impl: persistence}
 	tmpl := &atev1alpha1.ActorTemplate{Spec: atev1alpha1.ActorTemplateSpec{SnapshotsConfig: atev1alpha1.SnapshotsConfig{Location: "gs://snapshots"}}}
 	stored, err := w.ensureSuspendedFinalized(ctx, resources.ActorRef{Atespace: "team-a", Name: "actor-1"}, tmpl)
 	if err != nil {
@@ -429,7 +429,7 @@ func TestEnsureSuspendedFinalized_ReleasesOnlyOwnWorker(t *testing.T) {
 				t.Fatalf("CreateWorker: %v", err)
 			}
 
-			w := &ActorWorkflow{store: persistence}
+			w := &ActorWorkflow{impl: persistence}
 			tmpl := &atev1alpha1.ActorTemplate{Spec: atev1alpha1.ActorTemplateSpec{SnapshotsConfig: atev1alpha1.SnapshotsConfig{Location: "gs://bucket/root"}}}
 			if _, err := w.ensureSuspendedFinalized(ctx, resources.ActorRef{Atespace: "team-a", Name: "shared"}, tmpl); err != nil {
 				t.Fatalf("ensureSuspendedFinalized: %v", err)
@@ -470,7 +470,7 @@ func TestEnsureSuspendedFinalized_SnapshotSourceActorVersion(t *testing.T) {
 		t.Fatalf("CreateActor: %v", err)
 	}
 
-	w := &ActorWorkflow{store: persistence}
+	w := &ActorWorkflow{impl: persistence}
 	tmpl := &atev1alpha1.ActorTemplate{Spec: atev1alpha1.ActorTemplateSpec{SnapshotsConfig: atev1alpha1.SnapshotsConfig{Location: "gs://snapshots"}}}
 	final, err := w.ensureSuspendedFinalized(ctx, resources.ActorRef{Atespace: "team-a", Name: "actor-1"}, tmpl)
 	if err != nil {

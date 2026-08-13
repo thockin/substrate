@@ -39,7 +39,7 @@ func (s *Service) ListActors(ctx context.Context, req *ateapipb.ListActorsReques
 		return nil, toGRPCStatusError(errs)
 	}
 
-	actors, nextToken, err := s.persistence.ListActors(ctx, req.GetAtespace(), effectivePageSize(req.GetPageSize()), req.GetPageToken())
+	actors, nextToken, err := s.impl.ListActors(ctx, req.GetAtespace(), effectivePageSize(req.GetPageSize()), req.GetPageToken())
 	if err != nil {
 		return nil, fmt.Errorf("while listing actors in db: %w", err)
 	}

@@ -85,7 +85,7 @@ func (w *ActorWorkflow) loadActorForSuspend(ctx context.Context, actorRef resour
 	ctx, done := stepSpan(ctx, "LoadActorForSuspend")
 	defer func() { err = done(err) }()
 
-	actor, err := w.store.GetActor(ctx, actorRef)
+	actor, err := w.impl.GetActor(ctx, actorRef)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -119,7 +119,7 @@ func (w *ActorWorkflow) ensureMarkedSuspending(ctx context.Context, actorRef res
 	if _, err := inProgressSnapshotURI(actorTemplate, actorRef.Atespace, name); err != nil {
 		return nil, err
 	}
-	updated, err := w.store.UpdateActor(ctx, actorRef, func(dbActor *ateapipb.Actor) error {
+	updated, err := w.impl.UpdateActor(ctx, actorRef, func(dbActor *ateapipb.Actor) error {
 		if err := store.CheckActorPrecondition(dbActor, actor.GetMetadata().GetUid(), actor.GetMetadata().GetVersion()); err != nil {
 			return err
 		}
@@ -162,7 +162,7 @@ func (w *ActorWorkflow) ensureAteletSuspended(ctx context.Context, actorRef reso
 	assignment := actor.GetWorkerAssignment()
 	if assignment == nil {
 		// Missing active worker pod reference in SUSPENDING state indicates corrupted store state.
-		if err := crashActor(ctx, w.store, actorRef, ateattr.OperationSuspend, ateattr.ReasonCorruptedAssignment); err != nil {
+		if err := crashActor(ctx, w.impl, actorRef, ateattr.OperationSuspend, ateattr.ReasonCorruptedAssignment); err != nil {
 			slog.ErrorContext(ctx, "Failed to crash actor", slog.String("err", err.Error()))
 		}
 		return "", fmt.Errorf("actor is CRASHED because it was in SUSPENDING state but has no active worker")
@@ -172,7 +172,7 @@ func (w *ActorWorkflow) ensureAteletSuspended(ctx context.Context, actorRef reso
 	if err != nil {
 		if errors.Is(err, ErrWorkerPodNotFound) {
 			slog.ErrorContext(ctx, "Worker pod gone before checkpoint, crashing actor", "namespace", assignment.GetWorkerNamespace(), "pod", assignment.GetWorkerPod(), "in_progress_snapshot_name", actor.GetInProgressSnapshotName())
-			if err := crashActor(ctx, w.store, actorRef, ateattr.OperationSuspend, ateattr.ReasonWorkerPodGone); err != nil {
+			if err := crashActor(ctx, w.impl, actorRef, ateattr.OperationSuspend, ateattr.ReasonWorkerPodGone); err != nil {
 				slog.ErrorContext(ctx, "Failed to crash actor", slog.String("err", err.Error()))
 			}
 			return "", fmt.Errorf("actor is CRASHED because its worker pod is gone and no snapshot was written")
@@ -213,7 +213,7 @@ func (w *ActorWorkflow) ensureAteletSuspended(ctx context.Context, actorRef reso
 	wireSnapshotScope = ateattr.SnapshotScopeValue(req.Scope)
 
 	_, err = client.Checkpoint(ctx, req)
-	return wireSnapshotScope, maybeCrashActor(ctx, w.store, actorRef, err, "while checkpointing workload", ateattr.OperationSuspend)
+	return wireSnapshotScope, maybeCrashActor(ctx, w.impl, actorRef, err, "while checkpointing workload", ateattr.OperationSuspend)
 }
 
 func inProgressSnapshotURI(actorTemplate *atev1alpha1.ActorTemplate, atespace, name string) (resources.SnapshotURI, error) {
@@ -233,7 +233,7 @@ func (w *ActorWorkflow) ensureVolumesDetached(ctx context.Context, actor *ateapi
 	ctx, done := stepSpan(ctx, spanName)
 	defer func() { err = done(err) }()
 
-	return detachActorVolumes(ctx, w.store, w.pluginRegistry, actor, actorTemplate, op)
+	return detachActorVolumes(ctx, w.impl, w.pluginRegistry, actor, actorTemplate, op)
 }
 
 // ensureSuspendedFinalized releases the actor's worker (only when it is still
@@ -246,7 +246,7 @@ func (w *ActorWorkflow) ensureSuspendedFinalized(ctx context.Context, actorRef r
 	ctx, done := stepSpan(ctx, "FinalizeSuspended")
 	defer func() { err = done(err) }()
 
-	latestActor, err := w.store.GetActor(ctx, actorRef)
+	latestActor, err := w.impl.GetActor(ctx, actorRef)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +255,7 @@ func (w *ActorWorkflow) ensureSuspendedFinalized(ctx context.Context, actorRef r
 	if assignment := latestActor.GetWorkerAssignment(); assignment != nil {
 		workerPod := assignment.GetWorkerPod()
 
-		worker, err := w.store.GetWorker(ctx, assignment.GetWorkerNamespace(), assignment.GetWorkerPool(), workerPod)
+		worker, err := w.impl.GetWorker(ctx, assignment.GetWorkerNamespace(), assignment.GetWorkerPool(), workerPod)
 		if err != nil {
 			if !errors.Is(err, store.ErrNotFound) {
 				return nil, fmt.Errorf("while getting worker for release: %w", err)
@@ -266,7 +266,7 @@ func (w *ActorWorkflow) ensureSuspendedFinalized(ctx context.Context, actorRef r
 			if wass := worker.Assignment; wass != nil {
 				if wass.GetActorUid() == latestActor.GetMetadata().GetUid() {
 					worker.Assignment = nil
-					if err := w.store.UpdateWorker(ctx, worker, worker.Version); err != nil {
+					if err := w.impl.UpdateWorker(ctx, worker, worker.Version); err != nil {
 						if errors.Is(err, store.ErrVersionConflict) {
 							return nil, status.Error(codes.Aborted, "concurrent update conflict, please retry")
 						}
@@ -277,7 +277,7 @@ func (w *ActorWorkflow) ensureSuspendedFinalized(ctx context.Context, actorRef r
 		}
 
 		// Re-fetch the actor now that the worker is freed.
-		latestActor, err = w.store.GetActor(ctx, actorRef)
+		latestActor, err = w.impl.GetActor(ctx, actorRef)
 		if err != nil {
 			return nil, err
 		}
@@ -307,11 +307,11 @@ func (w *ActorWorkflow) ensureSuspendedFinalized(ctx context.Context, actorRef r
 		}
 		// ErrAlreadyExists means a previous attempt crashed after creating
 		// the snapshot record; the persisted record is authoritative.
-		if _, err := w.store.CreateActorSnapshot(ctx, snapshot); err != nil && !errors.Is(err, store.ErrAlreadyExists) {
+		if _, err := w.impl.CreateActorSnapshot(ctx, snapshot); err != nil && !errors.Is(err, store.ErrAlreadyExists) {
 			return nil, err
 		}
 	}
-	updatedActor, err := w.store.UpdateActor(ctx, actorRef, func(dbActor *ateapipb.Actor) error {
+	updatedActor, err := w.impl.UpdateActor(ctx, actorRef, func(dbActor *ateapipb.Actor) error {
 		if err := store.CheckActorPrecondition(dbActor, latestActor.GetMetadata().GetUid(), latestActor.GetMetadata().GetVersion()); err != nil {
 			return err
 		}

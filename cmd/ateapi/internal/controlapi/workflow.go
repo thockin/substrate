@@ -68,7 +68,7 @@ func markSkipped(ctx context.Context, reason string) {
 
 // ActorWorkflow handles the workflows for actor's resume / suspend operations.
 type ActorWorkflow struct {
-	store                store.Interface
+	impl                 store.Interface
 	workerCache          *workercache.Cache
 	scheduler            scheduling.Scheduler
 	dialer               *AteletDialer
@@ -85,7 +85,7 @@ type ActorWorkflow struct {
 
 // NewActorWorkflow creates a new ActorWorkflow. instruments may be nil.
 func NewActorWorkflow(
-	store store.Interface,
+	impl store.Interface,
 	workerCache *workercache.Cache,
 	dialer *AteletDialer,
 	actorTemplateLister listersv1alpha1.ActorTemplateLister,
@@ -98,7 +98,7 @@ func NewActorWorkflow(
 	pluginRegistry VolumePluginRegistry,
 ) *ActorWorkflow {
 	return &ActorWorkflow{
-		store:                store,
+		impl:                 impl,
 		workerCache:          workerCache,
 		scheduler:            scheduling.New(workerCache, scheduling.WithMeter(otel.Meter("ateapi"))),
 		dialer:               dialer,
@@ -117,7 +117,7 @@ func NewActorWorkflow(
 func (w *ActorWorkflow) acquireActorLock(ctx context.Context, actorRef resources.ActorRef) (context.Context, *store.Lock, error) {
 	lockKey := "lock:actor:" + actorRef.Atespace + ":" + actorRef.Name
 
-	lock, err := w.store.AcquireLock(ctx, lockKey)
+	lock, err := w.impl.AcquireLock(ctx, lockKey)
 	if err != nil {
 		if errors.Is(err, store.ErrLockConflict) {
 			return nil, nil, status.Error(grpcCodes.Aborted, "another operation is in progress for this actor")

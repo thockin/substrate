@@ -32,7 +32,7 @@ func (s *Service) GetActor(ctx context.Context, req *ateapipb.GetActorRequest) (
 		return nil, toGRPCStatusError(errs)
 	}
 	actorRef := resources.ActorRefFromObjectRef(req.GetActor())
-	actor, err := s.persistence.GetActor(ctx, actorRef)
+	actor, err := s.impl.GetActor(ctx, actorRef)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "Actor %s not found", actorRef)
 	} else if err != nil {

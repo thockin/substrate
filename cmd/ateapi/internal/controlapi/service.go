@@ -28,10 +28,10 @@ import (
 	storagev1listers "k8s.io/client-go/listers/storage/v1"
 )
 
-// Service implements ateapipb.Control
+// Service implements ateapipb.ControlServer.
 type Service struct {
 	ateapipb.UnimplementedControlServer
-	persistence           store.Interface
+	impl                  store.Interface
 	workerCache           *workercache.Cache
 	dialer                *AteletDialer
 	actorTemplateLister   listersv1alpha1.ActorTemplateLister
@@ -51,7 +51,9 @@ type VolumePluginRegistry interface {
 	GetPlugin(ctx context.Context, name string) (volume.VolumePluginControlPlane, error)
 }
 
-// NewService creates a service. instruments may be nil; the record helpers no-op.
+// NewService creates an instance of the ControlServer service. This is what
+// implements the outward-facing RPC interface. instruments may be nil; the
+// record helpers no-op.
 func NewService(
 	persistence store.Interface,
 	workerCache *workercache.Cache,
@@ -66,8 +68,9 @@ func NewService(
 	egressGatewayAddress string,
 	volumePlugins map[string]volume.VolumePluginControlPlane,
 ) *Service {
+	impl := newServiceImpl(persistence)
 	s := &Service{
-		persistence:           persistence,
+		impl:                  impl,
 		workerCache:           workerCache,
 		actorTemplateLister:   actorTemplateLister,
 		workerPoolLister:      workerPoolLister,
@@ -77,7 +80,7 @@ func NewService(
 		instruments:           instruments,
 		volumePlugins:         volumePlugins,
 	}
-	s.actorWorkflow = NewActorWorkflow(persistence, workerCache, dialer, actorTemplateLister, workerPoolLister, sandboxConfigLister, storageClassLister, kubeClient, instruments, egressGatewayAddress, s)
+	s.actorWorkflow = NewActorWorkflow(impl, workerCache, dialer, actorTemplateLister, workerPoolLister, sandboxConfigLister, storageClassLister, kubeClient, instruments, egressGatewayAddress, s)
 	return s
 }
 

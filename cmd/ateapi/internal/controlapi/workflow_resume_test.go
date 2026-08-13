@@ -90,7 +90,7 @@ func TestAssignWorkerAttempt_SkipsWorkerAssignedInOtherAtespace(t *testing.T) {
 		t.Fatalf("workercache.Start: %v", err)
 	}
 
-	w := &ActorWorkflow{store: persistence, workerCache: wc, scheduler: scheduling.New(wc)}
+	w := &ActorWorkflow{impl: persistence, workerCache: wc, scheduler: scheduling.New(wc)}
 	actor := &ateapipb.Actor{
 		Metadata: &ateapipb.ResourceMetadata{Atespace: "team-a", Name: "shared", Uid: "actor-uid"},
 	}
@@ -163,7 +163,7 @@ func TestAssignWorkerAttempt_ReleasesIneligibleStaleWorkerInBackground(t *testin
 		t.Fatalf("workercache.Start: %v", err)
 	}
 
-	w := &ActorWorkflow{store: persistence, workerCache: wc, scheduler: scheduling.New(wc)}
+	w := &ActorWorkflow{impl: persistence, workerCache: wc, scheduler: scheduling.New(wc)}
 	tmpl := &atev1alpha1.ActorTemplate{
 		Spec: atev1alpha1.ActorTemplateSpec{SandboxClass: atev1alpha1.SandboxClassGvisor},
 	}
@@ -255,7 +255,7 @@ func TestAssignWorkerAttempt_RetryAfterConflictPicksFreshWorker(t *testing.T) {
 		t.Fatalf("workercache.Start: %v", err)
 	}
 
-	w := &ActorWorkflow{store: persistence, workerCache: wc, scheduler: scheduling.New(wc)}
+	w := &ActorWorkflow{impl: persistence, workerCache: wc, scheduler: scheduling.New(wc)}
 	tmpl := &atev1alpha1.ActorTemplate{
 		Spec: atev1alpha1.ActorTemplateSpec{SandboxClass: atev1alpha1.SandboxClassGvisor},
 	}
@@ -396,7 +396,7 @@ func TestAssignWorkerAttempt_ConflictRefreshesActor(t *testing.T) {
 				}
 			}}
 
-			w := &ActorWorkflow{store: st, workerCache: wc, scheduler: scheduling.New(wc)}
+			w := &ActorWorkflow{impl: st, workerCache: wc, scheduler: scheduling.New(wc)}
 			tmpl := &atev1alpha1.ActorTemplate{
 				Spec: atev1alpha1.ActorTemplateSpec{SandboxClass: atev1alpha1.SandboxClassGvisor},
 			}
@@ -704,7 +704,7 @@ func TestValidateAssignedWorker_WorkerOwnership(t *testing.T) {
 
 			seedWorkflowActor(t, ctx, persistence, resources.ActorRef{Atespace: "team-a", Name: "shared"}, "ns", "tmpl1", ateapipb.Actor_STATUS_RESUMING)
 
-			w := &ActorWorkflow{store: persistence, scheduler: scheduling.New(nil)}
+			w := &ActorWorkflow{impl: persistence, scheduler: scheduling.New(nil)}
 			resumingActor := &ateapipb.Actor{
 				Metadata: &ateapipb.ResourceMetadata{Atespace: "team-a", Name: "shared", Uid: "own-actor-uid"},
 				Status:   ateapipb.Actor_STATUS_RESUMING,
@@ -903,7 +903,7 @@ func TestLoadActorForResume_OnGoldenDataResume(t *testing.T) {
 				t.Fatalf("add template to indexer: %v", err)
 			}
 
-			w := &ActorWorkflow{store: persistence, actorTemplateLister: listersv1alpha1.NewActorTemplateLister(indexer)}
+			w := &ActorWorkflow{impl: persistence, actorTemplateLister: listersv1alpha1.NewActorTemplateLister(indexer)}
 			_, _, src, err := w.loadActorForResume(ctx, actorRef, false)
 			if got := status.Code(err); got != tt.wantCode {
 				t.Fatalf("status.Code(err) = %v, want %v (err: %v)", got, tt.wantCode, err)
@@ -949,7 +949,7 @@ func TestLoadActorForResume_GoldenFallbackRejectsNonFullGolden(t *testing.T) {
 		t.Fatalf("add template to indexer: %v", err)
 	}
 
-	w := &ActorWorkflow{store: persistence, actorTemplateLister: listersv1alpha1.NewActorTemplateLister(indexer)}
+	w := &ActorWorkflow{impl: persistence, actorTemplateLister: listersv1alpha1.NewActorTemplateLister(indexer)}
 	_, _, _, err := w.loadActorForResume(ctx, actorRef, false)
 	if got := status.Code(err); got != codes.FailedPrecondition {
 		t.Fatalf("status.Code(err) = %v, want FailedPrecondition (err: %v)", got, err)
@@ -970,7 +970,7 @@ func TestLoadActorForResume_RunningActorShortCircuits(t *testing.T) {
 	seedWorkflowActor(t, ctx, persistence, actorRef, "ns", "missing-tmpl", ateapipb.Actor_STATUS_RUNNING)
 
 	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
-	w := &ActorWorkflow{store: persistence, actorTemplateLister: listersv1alpha1.NewActorTemplateLister(indexer)}
+	w := &ActorWorkflow{impl: persistence, actorTemplateLister: listersv1alpha1.NewActorTemplateLister(indexer)}
 
 	actor, tmpl, src, err := w.loadActorForResume(ctx, actorRef, false)
 	if err != nil {
