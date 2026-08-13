@@ -92,65 +92,16 @@ func (s *ServiceImpl) DeleteAtespace(ctx context.Context, name string) (*ateapip
 	return s.Interface.DeleteAtespace(ctx, name)
 }
 
-/*
 func (s *ServiceImpl) WatchWorkers(ctx context.Context) (*store.WorkerWatch, error) {
-	// watchCtx scopes the subscription's lifetime: it is cancelled either by the
-	// caller via WorkerWatch.Close or when the parent ctx is cancelled.
-	watchCtx, cancel := context.WithCancel(ctx)
-	pubsub := s.rdb.Subscribe(watchCtx, workerPubSubChannel)
-	// Subscribe sends the SUBSCRIBE command asynchronously; wait for the
-	// confirmation reply so that events published after WatchWorkers returns
-	// are guaranteed to be delivered to this subscription.
-	receiveCtx, receiveCancel := context.WithTimeout(watchCtx, subscribeConfirmTimeout)
-	defer receiveCancel()
-	if _, err := pubsub.Receive(receiveCtx); err != nil {
-		pubsub.Close()
-		cancel()
-		return nil, fmt.Errorf("while confirming worker subscription: %w", err)
-	}
-	ch := make(chan store.WorkerEvent, 128)
-	go func() {
-		defer close(ch)
-		defer pubsub.Close()
-		msgCh := pubsub.Channel()
-		for {
-			select {
-			case <-watchCtx.Done():
-				return
-			case msg, ok := <-msgCh:
-				if !ok {
-					return
-				}
-				event, err := unmarshalWorkerEvent(msg.Payload)
-				if err != nil {
-					slog.ErrorContext(ctx, "worker event unmarshal failed", slog.Any("err", err))
-					continue
-				}
-				select {
-				case ch <- event:
-				case <-watchCtx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return store.NewWorkerWatch(ch, cancel), nil
+	return s.Interface.WatchWorkers(ctx)
 }
 
 // DebugClearAll flushes all data from Redis.
 func (s *ServiceImpl) DebugClearAll(ctx context.Context) error {
-	// Iterate through every Primary (Master) node in the cluster
-	err := s.rdb.ForEachMaster(ctx, func(ctx context.Context, master *redis.Client) error {
-		// Log which shard we are currently flushing (optional but helpful for debugging)
-		shardAddr := master.Options().Addr
-		fmt.Printf("Flushing shard: %s\n", shardAddr)
-
-		// Execute the flush on this specific shard
-		return master.FlushAllAsync(ctx).Err()
-	})
-	return err
+	return s.Interface.DebugClearAll(ctx)
 }
 
+/*
 func (s *ServiceImpl) GetActor(ctx context.Context, actorRef resources.ActorRef) (*ateapipb.Actor, error) {
 	dbKey := actorDBKey(actorRef)
 
