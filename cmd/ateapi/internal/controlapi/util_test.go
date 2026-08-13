@@ -57,3 +57,13 @@ func validActor(mutate func(*ateapipb.Actor)) *ateapipb.Actor {
 	}
 	return a
 }
+
+func validAtespace(mutate func(*ateapipb.Atespace)) *ateapipb.Atespace {
+	a := &ateapipb.Atespace{
+		Metadata: &ateapipb.ResourceMetadata{Atespace: "", Name: "my-name"},
+	}
+	if mutate != nil {
+		mutate(a)
+	}
+	return a
+}

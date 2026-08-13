@@ -366,6 +366,7 @@ message CreateAtespaceRequest {
   // The atespace to create.
   //
   // +k8s:required
+  // +k8s:opaqueType # creates are handled in 2 steps: metadata then resource
   Atespace atespace = 1;
 }
 

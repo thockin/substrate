@@ -481,3 +481,40 @@ func TestValidateObjectRef(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateAtespace(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *ateapipb.Atespace
+		want field.ErrorList
+	}{{
+		"valid",
+		validAtespace(nil),
+		nil,
+	}, {
+		"missing metadata",
+		validAtespace(func(a *ateapipb.Atespace) { a.Metadata = nil }),
+		field.ErrorList{field.Required(field.NewPath("metadata"), "")},
+	}, {
+		"metadata.atespace must be empty",
+		validAtespace(func(a *ateapipb.Atespace) { a.Metadata.Atespace = "ns1" }),
+		field.ErrorList{field.Forbidden(field.NewPath("metadata", "atespace"), "")},
+	}, {
+		"missing metadata.name",
+		validAtespace(func(a *ateapipb.Atespace) { a.Metadata.Name = "" }),
+		field.ErrorList{field.Required(field.NewPath("metadata", "name"), "")},
+	}, {
+		"invalid metadata.name",
+		validAtespace(func(a *ateapipb.Atespace) { a.Metadata.Name = "Team_A" }),
+		field.ErrorList{field.Invalid(field.NewPath("metadata", "name"), "", "").WithOrigin("format=k8s-short-name")},
+	}, {
+		"too-long metadata.name",
+		validAtespace(func(a *ateapipb.Atespace) { a.Metadata.Name = strings.Repeat("x", 64) }),
+		field.ErrorList{field.Invalid(field.NewPath("metadata", "name"), "", "").WithOrigin("format=k8s-short-name")},
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertValidateErr(t, validateAtespace(context.Background(), tt.req), tt.want)
+		})
+	}
+}

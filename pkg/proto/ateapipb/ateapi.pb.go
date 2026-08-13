@@ -1315,6 +1315,7 @@ type CreateAtespaceRequest struct {
 	// The atespace to create.
 	//
 	// +k8s:required
+	// +k8s:opaqueType # creates are handled in 2 steps: metadata then resource
 	Atespace      *Atespace `protobuf:"bytes,1,opt,name=atespace,proto3" json:"atespace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

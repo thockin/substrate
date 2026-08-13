@@ -15,7 +15,17 @@
 package controlapi
 
 import (
+	"context"
+
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
+	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
+	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"k8s.io/apimachinery/pkg/api/operation"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
 // ServiceImpl implements store.Interface and provides the "middleware" layer
@@ -40,182 +50,49 @@ func newServiceImpl(
 	return s
 }
 
-/*
 func (s *ServiceImpl) CreateAtespace(ctx context.Context, atespace *ateapipb.Atespace) (*ateapipb.Atespace, error) {
-	dbKey := atespaceDBKey(atespace.GetMetadata().GetName())
+	if atespace == nil {
+		return nil, status.Error(codes.Internal, "nil atespace")
+	}
+	if errs := validateAtespace(ctx, atespace); len(errs) > 0 {
+		return nil, toGRPCStatusError(errs)
+	}
 
-	dbAtespace := proto.Clone(atespace).(*ateapipb.Atespace)
-	// Atespace is global-scoped: identity is the name alone (atespace stays empty).
-	dbAtespace.Metadata = newCreateMetadata("", atespace.GetMetadata().GetName())
+	dbAtespace := proto.CloneOf(atespace)
+	setCreateMetadata(dbAtespace.Metadata)
 
-	dbBytes, err := protojson.Marshal(dbAtespace)
-	if err != nil {
-		return nil, fmt.Errorf("in protojson.Marshal: %w", err)
-	}
-	ok, err := s.rdb.SetNX(ctx, dbKey, dbBytes, 0).Result()
-	if err != nil {
-		return nil, fmt.Errorf("while executing redis set: %w", err)
-	}
-	if !ok {
-		return nil, store.ErrAlreadyExists
-	}
-	return dbAtespace, nil
+	return s.Interface.CreateAtespace(ctx, dbAtespace)
+}
+
+func validateAtespace(ctx context.Context, atespace *ateapipb.Atespace) field.ErrorList {
+	// Call the generated validation.
+	op := operation.Operation{Type: operation.Create}
+	return Validate_Atespace(ctx, op, nil, atespace, nil)
 }
 
 func (s *ServiceImpl) GetAtespace(ctx context.Context, name string) (*ateapipb.Atespace, error) {
-	dbKey := atespaceDBKey(name)
-	dbBytes, err := s.rdb.Get(ctx, dbKey).Bytes()
-	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("while getting atespace key %q: %w", dbKey, err)
-	}
-	atespace := &ateapipb.Atespace{}
-	if err := protojson.Unmarshal(dbBytes, atespace); err != nil {
-		return nil, fmt.Errorf("while unmarshaling atespace: %w", err)
-	}
-	if atespace.GetMetadata().GetName() != name {
-		return nil, fmt.Errorf("(impossible) mismatch between stored name and key %q", dbKey)
-	}
-	return atespace, nil
+	return s.Interface.GetAtespace(ctx, name)
 }
 
 // AtespaceExists reports whether the atespace object exists. This is a plain
 // EXISTS check and is NOT atomic with respect to a concurrent DeleteAtespace.
+// TODO: current usage of this outside of a transaction is suspect
 func (s *ServiceImpl) AtespaceExists(ctx context.Context, name string) (bool, error) {
-	n, err := s.rdb.Exists(ctx, atespaceDBKey(name)).Result()
-	if err != nil {
-		return false, fmt.Errorf("while checking atespace existence: %w", err)
-	}
-	return n > 0, nil
+	return s.Interface.AtespaceExists(ctx, name)
 }
 
 func (s *ServiceImpl) ListAtespaces(ctx context.Context, pageSize int32, pageTokenStr string) ([]*ateapipb.Atespace, string, error) {
-	var result []*ateapipb.Atespace
-	nextToken, err := s.listPage(ctx, "atespace:*", pageSize, pageTokenStr, func(ctx context.Context, master *redis.Client, keys []string) (int, error) {
-		atespaces, err := fetchProtos(ctx, master, keys, func() *ateapipb.Atespace { return &ateapipb.Atespace{} })
-		if err != nil {
-			return 0, err
-		}
-		result = append(result, atespaces...)
-		return len(atespaces), nil
-	})
-	if err != nil {
-		return nil, "", err
-	}
-	return result, nextToken, nil
+	return s.Interface.ListAtespaces(ctx, pageSize, pageTokenStr)
 }
 
 // DeleteAtespace deletes an empty atespace. Returns store.ErrNotFound if the
 // atespace does not exist, or store.ErrFailedPrecondition if any Actor or
 // ActorSnapshotTag still lives in it.
 func (s *ServiceImpl) DeleteAtespace(ctx context.Context, name string) (*ateapipb.Atespace, error) {
-	dbKey := atespaceDBKey(name)
-
-	// Read first, so a missing atespace returns NotFound (not a silent no-op) and
-	// so we can return the deleted resource.
-	currentVal, err := s.rdb.Get(ctx, dbKey).Bytes()
-	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("while getting atespace key %q: %w", dbKey, err)
-	}
-
-	deleted := &ateapipb.Atespace{}
-	if err := protojson.Unmarshal(currentVal, deleted); err != nil {
-		return nil, fmt.Errorf("in protojson.Unmarshal: %w", err)
-	}
-
-	// Reject a non-empty atespace.
-	actors, _, err := s.ListActors(ctx, name, 1, "")
-	if err != nil {
-		return nil, fmt.Errorf("while checking atespace emptiness: %w", err)
-	}
-	if len(actors) > 0 {
-		return nil, store.ErrFailedPrecondition
-	}
-	hasTags, err := s.hasMatching(ctx, actorSnapshotTagScanPattern(name))
-	if err != nil {
-		return nil, fmt.Errorf("while checking ActorSnapshot tags: %w", err)
-	}
-	if hasTags {
-		return nil, store.ErrFailedPrecondition
-	}
-	if err := s.rdb.Del(ctx, dbKey).Err(); err != nil {
-		return nil, fmt.Errorf("while deleting atespace key %q: %w", dbKey, err)
-	}
-	return deleted, nil
+	return s.Interface.DeleteAtespace(ctx, name)
 }
 
-func (s *ServiceImpl) hasMatching(ctx context.Context, pattern string) (bool, error) {
-	masters, err := s.getSortedMasters(ctx)
-	if err != nil {
-		return false, err
-	}
-	for _, master := range masters {
-		for cursor := uint64(0); ; {
-			keys, next, err := master.Scan(ctx, cursor, pattern, 1).Result()
-			if err != nil {
-				return false, err
-			}
-			if len(keys) > 0 {
-				return true, nil
-			}
-			if cursor = next; cursor == 0 {
-				break
-			}
-		}
-	}
-	return false, nil
-}
-
-func workerDBKey(namespace, poolName, podName string) string {
-	return "worker:" + namespace + ":" + poolName + ":" + podName
-}
-
-func marshalWorkerEvent(eventType store.WorkerEventType, worker *ateapipb.Worker) (string, error) {
-	workerJSON, err := protojson.Marshal(worker)
-	if err != nil {
-		return "", fmt.Errorf("in protojson.Marshal: %w", err)
-	}
-	msg, err := json.Marshal(workerPubSubMsg{Type: int(eventType), Worker: string(workerJSON)})
-	if err != nil {
-		return "", fmt.Errorf("in json.Marshal: %w", err)
-	}
-	return string(msg), nil
-}
-
-func unmarshalWorkerEvent(payload string) (store.WorkerEvent, error) {
-	var msg workerPubSubMsg
-	if err := json.Unmarshal([]byte(payload), &msg); err != nil {
-		return store.WorkerEvent{}, fmt.Errorf("in json.Unmarshal: %w", err)
-	}
-	worker := &ateapipb.Worker{}
-	if err := protojson.Unmarshal([]byte(msg.Worker), worker); err != nil {
-		return store.WorkerEvent{}, fmt.Errorf("in protojson.Unmarshal: %w", err)
-	}
-	return store.WorkerEvent{Type: store.WorkerEventType(msg.Type), Worker: worker}, nil
-}
-
-const workerPubSubChannel = "worker-changes"
-
-// subscribeConfirmTimeout bounds WatchWorkers' wait for the SUBSCRIBE
-// confirmation.
-const subscribeConfirmTimeout = 5 * time.Second
-
-func (s *ServiceImpl) publishWorkerEvent(ctx context.Context, eventType store.WorkerEventType, worker *ateapipb.Worker) {
-	payload, err := marshalWorkerEvent(eventType, worker)
-	if err != nil {
-		slog.ErrorContext(ctx, "worker event marshal failed", slog.Any("err", err))
-		return
-	}
-	if err := s.rdb.Publish(ctx, workerPubSubChannel, payload).Err(); err != nil {
-		slog.ErrorContext(ctx, "worker event publish failed", slog.Any("err", err))
-	}
-}
-
+/*
 func (s *ServiceImpl) WatchWorkers(ctx context.Context) (*store.WorkerWatch, error) {
 	// watchCtx scopes the subscription's lifetime: it is cancelled either by the
 	// caller via WorkerWatch.Close or when the parent ctx is cancelled.
@@ -1094,19 +971,17 @@ func (s *ServiceImpl) releaseLock(ctx context.Context, key, value string) error 
 	}
 	return nil
 }
+*/
 
-func newCreateMetadata(atespace, name string) *ateapipb.ResourceMetadata {
+func setCreateMetadata(meta *ateapipb.ResourceMetadata) {
 	now := timestamppb.Now()
-	return &ateapipb.ResourceMetadata{
-		Atespace:   atespace,
-		Name:       name,
-		Uid:        uuid.NewString(),
-		Version:    1,
-		CreateTime: now,
-		UpdateTime: now,
-	}
+	meta.Uid = uuid.NewString()
+	meta.Version = 1
+	meta.CreateTime = now
+	meta.UpdateTime = now
 }
 
+/*
 func newUpdateMetadata(current *ateapipb.ResourceMetadata) *ateapipb.ResourceMetadata {
 	next := proto.Clone(current).(*ateapipb.ResourceMetadata)
 	next.Version = current.GetVersion() + 1

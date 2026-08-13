@@ -133,11 +133,7 @@ func atespaceDBKey(name string) string {
 func (s *Persistence) CreateAtespace(ctx context.Context, atespace *ateapipb.Atespace) (*ateapipb.Atespace, error) {
 	dbKey := atespaceDBKey(atespace.GetMetadata().GetName())
 
-	dbAtespace := proto.Clone(atespace).(*ateapipb.Atespace)
-	// Atespace is global-scoped: identity is the name alone (atespace stays empty).
-	dbAtespace.Metadata = newCreateMetadata("", atespace.GetMetadata().GetName())
-
-	dbBytes, err := protojson.Marshal(dbAtespace)
+	dbBytes, err := protojson.Marshal(atespace)
 	if err != nil {
 		return nil, fmt.Errorf("in protojson.Marshal: %w", err)
 	}
@@ -148,7 +144,7 @@ func (s *Persistence) CreateAtespace(ctx context.Context, atespace *ateapipb.Ate
 	if !ok {
 		return nil, store.ErrAlreadyExists
 	}
-	return dbAtespace, nil
+	return atespace, nil
 }
 
 func (s *Persistence) GetAtespace(ctx context.Context, name string) (*ateapipb.Atespace, error) {

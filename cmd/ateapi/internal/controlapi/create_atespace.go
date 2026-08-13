@@ -32,15 +32,11 @@ func (s *Service) CreateAtespace(ctx context.Context, req *ateapipb.CreateAtespa
 		return nil, toGRPCStatusError(errs)
 	}
 
-	name := req.GetAtespace().GetMetadata().GetName()
-	atespace := &ateapipb.Atespace{
-		Metadata: &ateapipb.ResourceMetadata{
-			Name: name,
-		},
-	}
+	atespace := req.Atespace
 	stored, err := s.impl.CreateAtespace(ctx, atespace)
 	if err != nil {
 		if errors.Is(err, store.ErrAlreadyExists) {
+			name := atespace.Metadata.Name
 			return nil, status.Errorf(codes.AlreadyExists, "Atespace %s already exists", name)
 		}
 		return nil, fmt.Errorf("while recording atespace: %w", err)
@@ -49,6 +45,8 @@ func (s *Service) CreateAtespace(ctx context.Context, req *ateapipb.CreateAtespa
 	return stored, nil
 }
 
+// validateCreateAtespaceRequest validates the CreateAtespaceRequest, but the
+// atespace itself is validated later by the impl layer.
 func validateCreateAtespaceRequest(ctx context.Context, req *ateapipb.CreateAtespaceRequest) field.ErrorList {
 	// Call the generated validation.
 	op := operation.Operation{Type: operation.Create}
