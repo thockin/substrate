@@ -18,6 +18,7 @@ import (
 	"context"
 
 	"github.com/agent-substrate/substrate/cmd/ateapi/internal/store"
+	"github.com/agent-substrate/substrate/internal/resources"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
@@ -101,54 +102,32 @@ func (s *ServiceImpl) DebugClearAll(ctx context.Context) error {
 	return s.Interface.DebugClearAll(ctx)
 }
 
-/*
 func (s *ServiceImpl) GetActor(ctx context.Context, actorRef resources.ActorRef) (*ateapipb.Actor, error) {
-	dbKey := actorDBKey(actorRef)
-
-	dbActorBytes, err := s.rdb.Get(ctx, dbKey).Bytes()
-	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("while getting actor key %q: %w", dbKey, err)
-	}
-
-	actor := &ateapipb.Actor{}
-	if err := protojson.Unmarshal(dbActorBytes, actor); err != nil {
-		return nil, fmt.Errorf("while unmarshaling actor: %w", err)
-	}
-
-	if resources.ActorRefFromActor(actor) != actorRef {
-		return nil, fmt.Errorf("(impossible) mismatch between stored name/atespace and key")
-	}
-
-	return actor, nil
+	return s.Interface.GetActor(ctx, actorRef)
 }
 
 func (s *ServiceImpl) CreateActor(ctx context.Context, actor *ateapipb.Actor) (*ateapipb.Actor, error) {
-	dbKey := actorDBKey(resources.ActorRefFromActor(actor))
-
-	// Clone so we don't stomp the caller's copy, then attach fresh server-owned
-	// metadata carrying the caller-specified identity.
-	dbActor := proto.Clone(actor).(*ateapipb.Actor)
-	dbActor.Metadata = newCreateMetadata(actor.GetMetadata().GetAtespace(), actor.GetMetadata().GetName())
-
-	dbActorBytes, err := protojson.Marshal(dbActor)
-	if err != nil {
-		return nil, fmt.Errorf("in protojson.Marshal: %w", err)
+	//
+	if actor == nil {
+		return nil, status.Error(codes.Internal, "nil actor")
+	}
+	if errs := validateActor(ctx, actor); len(errs) > 0 {
+		return nil, toGRPCStatusError(errs)
 	}
 
-	ok, err := s.rdb.SetNX(ctx, dbKey, dbActorBytes, 0).Result()
-	if err != nil {
-		return nil, fmt.Errorf("while executing redis set: %w", err)
-	}
-	if !ok {
-		return nil, store.ErrAlreadyExists
-	}
+	dbActor := proto.CloneOf(actor)
+	setCreateMetadata(dbActor.Metadata)
 
-	return dbActor, nil
+	return s.Interface.CreateActor(ctx, dbActor)
 }
 
+func validateActor(ctx context.Context, actor *ateapipb.Actor) field.ErrorList {
+	// Call the generated validation.
+	op := operation.Operation{Type: operation.Create}
+	return Validate_Actor(ctx, op, nil, actor, nil)
+}
+
+/*
 func (s *ServiceImpl) CreateActorSnapshot(ctx context.Context, snapshot *ateapipb.ActorSnapshot) (*ateapipb.ActorSnapshot, error) {
 	dbKey := actorSnapshotDBKey(snapshot.GetMetadata().GetAtespace(), snapshot.GetMetadata().GetName())
 	dbSnapshot := proto.Clone(snapshot).(*ateapipb.ActorSnapshot)

@@ -37,7 +37,7 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
 		return nil, toGRPCStatusError(errs)
 	}
 	start := time.Now()
-	in := req.GetActor()
+	in := req.GetActor() //FIXME: rename?
 	// Recorded only after validation, so every operation uniformly measures a
 	// validated request; malformed ones stay visible in rpc.server.call.duration.
 	defer func() {
@@ -114,6 +114,8 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
 		return nil, err
 	}
 
+	//FIXME: open-code status field wiping!
+	//FIXME: follow same pattern for this and atespace
 	actor := &ateapipb.Actor{
 		Metadata: &ateapipb.ResourceMetadata{
 			Atespace: atespace,

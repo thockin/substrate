@@ -1609,6 +1609,7 @@ type CreateActorRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The actor to create.
 	// +k8s:required
+	// +k8s:opaqueType # creates are handled in 2 steps: metadata then resource
 	Actor *Actor `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
 	// Optional durable snapshot used to initialize the Actor.
 	// TODO: validation

@@ -408,6 +408,7 @@ message GetActorRequest {
 message CreateActorRequest {
   // The actor to create.
   // +k8s:required
+  // +k8s:opaqueType # creates are handled in 2 steps: metadata then resource
   Actor actor = 1;
 
   // Optional durable snapshot used to initialize the Actor.
