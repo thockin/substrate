@@ -616,8 +616,12 @@ func (s *Persistence) CreateActor(ctx context.Context, actor *ateapipb.Actor) (*
 
 	// Clone so we don't stomp the caller's copy, then attach fresh server-owned
 	// metadata carrying the caller-specified identity.
+	// TODO: doing a full clone here is wasteful - the caller already has to
+	// make modifications to the actor before passing it in, so we can safely
+	// mutate it in place.  This breaks some of the contract tests, so we can
+	// fix it later.
 	dbActor := proto.Clone(actor).(*ateapipb.Actor)
-	dbActor.Metadata = newCreateMetadata(actor.GetMetadata().GetAtespace(), actor.GetMetadata().GetName())
+	setCreateMetadata(dbActor.Metadata)
 
 	dbActorBytes, err := protojson.Marshal(dbActor)
 	if err != nil {
@@ -1482,6 +1486,7 @@ func (s *Persistence) releaseLock(ctx context.Context, key, value string) error 
 	return nil
 }
 
+// TODO: EOL this in favor of setCreateMetadata
 func newCreateMetadata(atespace, name string) *ateapipb.ResourceMetadata {
 	now := timestamppb.Now()
 	return &ateapipb.ResourceMetadata{
@@ -1492,6 +1497,16 @@ func newCreateMetadata(atespace, name string) *ateapipb.ResourceMetadata {
 		CreateTime: now,
 		UpdateTime: now,
 	}
+}
+
+// TODO: This really does not belong in the storage layer, but there are a lot
+// of tests which assume that it does, so we can maybe fix this later.  For now
+// it is part of the storage contract.
+func setCreateMetadata(metadata *ateapipb.ResourceMetadata) {
+	metadata.Uid = uuid.NewString()
+	metadata.Version = 1
+	metadata.CreateTime = timestamppb.Now()
+	metadata.UpdateTime = metadata.CreateTime
 }
 
 func newUpdateMetadata(current *ateapipb.ResourceMetadata) *ateapipb.ResourceMetadata {
