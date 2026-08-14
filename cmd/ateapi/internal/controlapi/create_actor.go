@@ -24,8 +24,11 @@ import (
 	"github.com/agent-substrate/substrate/internal/ateattr"
 	"github.com/agent-substrate/substrate/internal/resources"
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/operation"
 	"k8s.io/apimachinery/pkg/api/validate/content"
@@ -33,9 +36,18 @@ import (
 )
 
 func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequest) (created *ateapipb.Actor, err error) {
+	// First scrub any fields that users are not allowed to set.
+	scrubCreateActorRequest(req)
+
+	// Validate the request, including the object within it.
 	if errs := validateCreateActorRequest(ctx, req); len(errs) > 0 {
 		return nil, toGRPCStatusError(errs)
 	}
+
+	//
+	// Handle the request
+	//
+
 	start := time.Now()
 	in := req.GetActor()
 	// Recorded only after validation, so every operation uniformly measures a
@@ -46,6 +58,7 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
 			ateattr.TemplateNamespaceKey.String(in.GetActorTemplateNamespace()),
 		)
 	}()
+
 	var sourceSnapshot *ateapipb.ActorSnapshot
 	var sourceSnapshotRef *ateapipb.ObjectRef
 	if ref := req.GetSourceSnapshot(); ref != nil {
@@ -114,18 +127,14 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
 		return nil, err
 	}
 
-	actor := &ateapipb.Actor{
-		Metadata: &ateapipb.ResourceMetadata{
-			Atespace: atespace,
-			Name:     name,
-		},
-		Status:                 ateapipb.Actor_STATUS_SUSPENDED,
-		ActorTemplateNamespace: templateNamespace,
-		ActorTemplateName:      templateName,
-		WorkerSelector:         in.GetWorkerSelector(),
-		ActorVolumes:           initVols,
-		LatestSnapshot:         sourceSnapshotRef,
+	actor := proto.CloneOf(in)
+	actor.Status = ateapipb.Actor_STATUS_SUSPENDED
+	actor.ActorVolumes = initVols
+	actor.LatestSnapshot = sourceSnapshotRef
+	if errs := validateActorUpdate(ctx, actor, in); len(errs) > 0 {
+		return nil, toGRPCInternalError(errs)
 	}
+
 	stored, err := s.persistence.CreateActor(ctx, actor)
 	if err != nil {
 		if errors.Is(err, store.ErrAlreadyExists) {
@@ -138,12 +147,48 @@ func (s *Service) CreateActor(ctx context.Context, req *ateapipb.CreateActorRequ
 	return stored, nil
 }
 
+// FIXME: do we need to Clone it to modify?
+func scrubCreateActorRequest(req *ateapipb.CreateActorRequest) {
+	actor := req.Actor
+	if actor == nil {
+		return // validation will flag it
+	}
+
+	// TODO: find a way to do this automatically - proto tags or codegen or something
+	scrubResourceMetadata(actor.Metadata)
+	actor.Status = 0
+	actor.WorkerAssignment = nil
+	actor.InProgressSnapshotName = ""
+	actor.LatestSnapshot = nil
+	actor.LocalSnapshotInfo = nil
+	actor.InProgressSnapshotSourceActorVersion = 0
+	actor.ActorVolumes = nil
+	actor.InProgressLocalSnapshotName = ""
+}
+
+// FIXME: put this in a common place for all resources.
+// TODO: find a way to do this automatically - proto tags or codegen or something
+func scrubResourceMetadata(in *ateapipb.ResourceMetadata) {
+	if in == nil {
+		return // validation will flag it
+	}
+	now := timestamppb.Now()
+	*in = ateapipb.ResourceMetadata{
+		Atespace:   in.Atespace,
+		Name:       in.Name,
+		Uid:        uuid.NewString(),
+		Version:    1,
+		CreateTime: now,
+		UpdateTime: now,
+	}
+}
+
 func validateCreateActorRequest(ctx context.Context, req *ateapipb.CreateActorRequest) field.ErrorList {
 	var fldPath *field.Path
 
 	// Call the generated validation.
 	op := operation.Operation{Type: operation.Create}
-	errs := Validate_CreateActorRequest(ctx, op, nil, req, nil)
+	errs := Validate_CreateActorRequest(ctx, op, fldPath, req, nil)
 
 	// TODO: remove when done with DV
 	if val := req.GetSourceSnapshot(); val != nil {
@@ -151,6 +196,16 @@ func validateCreateActorRequest(ctx context.Context, req *ateapipb.CreateActorRe
 			errs = append(errs, field.Invalid(fldPath.Child("source_snapshot"), val, err.Error()))
 		}
 	}
+
+	return errs
+}
+
+func validateActorUpdate(ctx context.Context, newVal, oldVal *ateapipb.Actor) field.ErrorList {
+	var fldPath *field.Path
+
+	// Call the generated validation.
+	op := operation.Operation{Type: operation.Update}
+	errs := Validate_Actor(ctx, op, fldPath, newVal, oldVal)
 
 	return errs
 }
