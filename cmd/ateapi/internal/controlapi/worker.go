@@ -30,7 +30,7 @@ func (s *RPCService) ListWorkers(ctx context.Context, req *ateapipb.ListWorkersR
 		return nil, toGRPCStatusError(errs)
 	}
 
-	page, err := s.persistence.ListWorkers(ctx, store.ListOptions{PageSize: effectivePageSize(req.GetPageSize()), PageToken: req.GetPageToken()})
+	page, err := s.impl.ListWorkers(ctx, store.ListOptions{PageSize: effectivePageSize(req.GetPageSize()), PageToken: req.GetPageToken()})
 	if err != nil {
 		return nil, mapListError(fmt.Errorf("while listing workers in db: %w", err))
 	}

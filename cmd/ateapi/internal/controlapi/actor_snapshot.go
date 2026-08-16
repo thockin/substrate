@@ -51,7 +51,7 @@ func (s *RPCService) GetActorSnapshot(ctx context.Context, req *ateapipb.GetActo
 	if errs := validateGetActorSnapshotRequest(req); len(errs) > 0 {
 		return nil, toGRPCStatusError(errs)
 	}
-	snapshot, err := s.persistence.GetActorSnapshot(ctx, req.GetSnapshot().GetAtespace(), req.GetSnapshot().GetName())
+	snapshot, err := s.impl.GetActorSnapshot(ctx, req.GetSnapshot().GetAtespace(), req.GetSnapshot().GetName())
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, status.Error(codes.NotFound, "ActorSnapshot not found")
 	}
@@ -78,7 +78,7 @@ func (s *RPCService) GetActorSnapshotTag(ctx context.Context, req *ateapipb.GetA
 	if errs := validateGetActorSnapshotTagRequest(req); len(errs) > 0 {
 		return nil, toGRPCStatusError(errs)
 	}
-	tag, err := s.persistence.GetActorSnapshotTag(ctx, req.GetTag().GetAtespace(), req.GetTag().GetName())
+	tag, err := s.impl.GetActorSnapshotTag(ctx, req.GetTag().GetAtespace(), req.GetTag().GetName())
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, status.Error(codes.NotFound, "ActorSnapshot tag not found")
 	}
@@ -105,7 +105,7 @@ func (s *RPCService) ListActorSnapshots(ctx context.Context, req *ateapipb.ListA
 	if errs := validateListActorSnapshotsRequest(req); len(errs) > 0 {
 		return nil, toGRPCStatusError(errs)
 	}
-	page, err := s.persistence.ListActorSnapshots(ctx, req.GetAtespace(), store.ListOptions{PageSize: effectivePageSize(req.GetPageSize()), PageToken: req.GetPageToken()})
+	page, err := s.impl.ListActorSnapshots(ctx, req.GetAtespace(), store.ListOptions{PageSize: effectivePageSize(req.GetPageSize()), PageToken: req.GetPageToken()})
 	if err != nil {
 		return nil, mapListError(fmt.Errorf("while listing actor snapshots: %w", err))
 	}
@@ -136,7 +136,7 @@ func (s *RPCService) CreateActorSnapshotTag(ctx context.Context, req *ateapipb.C
 	if req.GetActorSnapshotTag().GetMetadata().GetAtespace() != ref.GetAtespace() {
 		return nil, status.Error(codes.FailedPrecondition, "ActorSnapshot tags must belong to the snapshot's Atespace")
 	}
-	tag, err := s.persistence.CreateActorSnapshotTag(ctx, ref.GetAtespace(), ref.GetName(), req.GetActorSnapshotTag())
+	tag, err := s.impl.CreateActorSnapshotTag(ctx, ref.GetAtespace(), ref.GetName(), req.GetActorSnapshotTag())
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, status.Error(codes.NotFound, "ActorSnapshot not found")
 	}
@@ -183,7 +183,7 @@ func (s *RPCService) UpdateActorSnapshotTag(ctx context.Context, req *ateapipb.U
 	in := req.GetTag()
 	atespace, name := in.GetMetadata().GetAtespace(), in.GetMetadata().GetName()
 
-	storedTag, err := s.persistence.UpdateActorSnapshotTag(ctx, atespace, name, store.PreconditionFrom(in), func(toUpdate *ateapipb.ActorSnapshotTag) error {
+	storedTag, err := s.impl.UpdateActorSnapshotTag(ctx, atespace, name, store.PreconditionFrom(in), func(toUpdate *ateapipb.ActorSnapshotTag) error {
 		// Metadata is a server-owned field.
 		metadata := toUpdate.GetMetadata()
 		// Reset + merge from the input tag.
@@ -236,7 +236,7 @@ func (s *RPCService) DeleteActorSnapshotTag(ctx context.Context, req *ateapipb.D
 	if errs := validateDeleteActorSnapshotTagRequest(req); len(errs) > 0 {
 		return nil, toGRPCStatusError(errs)
 	}
-	tag, err := s.persistence.DeleteActorSnapshotTag(ctx, req.GetTag().GetAtespace(), req.GetTag().GetName())
+	tag, err := s.impl.DeleteActorSnapshotTag(ctx, req.GetTag().GetAtespace(), req.GetTag().GetName())
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "ActorSnapshot tag %s/%s not found", req.GetTag().GetAtespace(), req.GetTag().GetName())
 	}

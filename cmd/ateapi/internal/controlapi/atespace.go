@@ -38,7 +38,7 @@ func (s *RPCService) CreateAtespace(ctx context.Context, req *ateapipb.CreateAte
 			Name: name,
 		},
 	}
-	stored, err := s.persistence.CreateAtespace(ctx, atespace)
+	stored, err := s.impl.CreateAtespace(ctx, atespace)
 	if err != nil {
 		if errors.Is(err, store.ErrAlreadyExists) {
 			return nil, status.Errorf(codes.AlreadyExists, "Atespace %s already exists", name)
@@ -80,7 +80,7 @@ func (s *RPCService) GetAtespace(ctx context.Context, req *ateapipb.GetAtespaceR
 	}
 
 	name := req.GetAtespace().GetName()
-	atespace, err := s.persistence.GetAtespace(ctx, name)
+	atespace, err := s.impl.GetAtespace(ctx, name)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "Atespace %s not found", name)
 	} else if err != nil {
@@ -108,7 +108,7 @@ func (s *RPCService) ListAtespaces(ctx context.Context, req *ateapipb.ListAtespa
 		return nil, toGRPCStatusError(errs)
 	}
 
-	page, err := s.persistence.ListAtespaces(ctx, store.ListOptions{PageSize: effectivePageSize(req.GetPageSize()), PageToken: req.GetPageToken()})
+	page, err := s.impl.ListAtespaces(ctx, store.ListOptions{PageSize: effectivePageSize(req.GetPageSize()), PageToken: req.GetPageToken()})
 	if err != nil {
 		return nil, mapListError(fmt.Errorf("while listing atespaces in db: %w", err))
 	}
@@ -135,7 +135,7 @@ func (s *RPCService) DeleteAtespace(ctx context.Context, req *ateapipb.DeleteAte
 	}
 
 	name := req.GetAtespace().GetName()
-	lock, err := s.persistence.AcquireLock(ctx, "lock:atespace:"+name)
+	lock, err := s.impl.AcquireLock(ctx, "lock:atespace:"+name)
 	if errors.Is(err, store.ErrLockConflict) {
 		return nil, status.Error(codes.Aborted, "another operation is using this Atespace")
 	}
@@ -143,7 +143,7 @@ func (s *RPCService) DeleteAtespace(ctx context.Context, req *ateapipb.DeleteAte
 		return nil, fmt.Errorf("while locking Atespace: %w", err)
 	}
 	defer lock.Close()
-	deleted, err := s.persistence.DeleteAtespace(lock.Context(), name)
+	deleted, err := s.impl.DeleteAtespace(lock.Context(), name)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, status.Errorf(codes.NotFound, "Atespace %s not found", name)
