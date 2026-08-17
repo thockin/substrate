@@ -1039,12 +1039,6 @@ func (s *Persistence) DeleteActor(ctx context.Context, actorRef resources.ActorR
 // validateUpdateActorMutation reports whether an actor mutation left the fields it does
 // not own alone.
 func validateUpdateActorMutation(storedActor, mutatedActor *ateapipb.Actor) error {
-	if stored, mutated := storedActor.GetMetadata().GetAtespace(), mutatedActor.GetMetadata().GetAtespace(); stored != mutated {
-		return fmt.Errorf("metadata.atespace is immutable: mutation changed it from %q to %q", stored, mutated)
-	}
-	if stored, mutated := storedActor.GetMetadata().GetName(), mutatedActor.GetMetadata().GetName(); stored != mutated {
-		return fmt.Errorf("metadata.name is immutable: mutation changed it from %q to %q", stored, mutated)
-	}
 	if stored, mutated := storedActor.GetActorTemplateNamespace(), mutatedActor.GetActorTemplateNamespace(); stored != mutated {
 		return fmt.Errorf("actor_template_namespace is immutable: mutation changed it from %q to %q", stored, mutated)
 	}
@@ -1095,6 +1089,8 @@ func (s *Persistence) UpdateActor(ctx context.Context, actorRef resources.ActorR
 
 			// Snapshot the stored state before handing the actor to mutate.
 			// mutate is free to edit anything it is given.
+			//FIXME: the mutate function has to do a clone to call validation,
+			//       so this is redundant. Can we get rid of one?
 			actorBeforeMutation := proto.Clone(currentActor).(*ateapipb.Actor)
 			if err := mutate(currentActor); err != nil {
 				abortErr = err
@@ -1106,7 +1102,7 @@ func (s *Persistence) UpdateActor(ctx context.Context, actorRef resources.ActorR
 			}
 			// The stored metadata is authoritative; derive the next metadata
 			// from it, discarding whatever mutate made of it.
-			currentActor.Metadata = newUpdateMetadata(actorBeforeMutation.GetMetadata())
+			setUpdateMetadata(actorBeforeMutation.Metadata, currentActor.Metadata)
 
 			newVal, err := protojson.Marshal(currentActor)
 			if err != nil {
@@ -1499,9 +1495,6 @@ func newCreateMetadata(atespace, name string) *ateapipb.ResourceMetadata {
 	}
 }
 
-// TODO: This really does not belong in the storage layer, but there are a lot
-// of tests which assume that it does, so we can maybe fix this later.  For now
-// it is part of the storage contract.
 func setCreateMetadata(metadata *ateapipb.ResourceMetadata) {
 	metadata.Uid = uuid.NewString()
 	metadata.Version = 1
@@ -1509,9 +1502,17 @@ func setCreateMetadata(metadata *ateapipb.ResourceMetadata) {
 	metadata.UpdateTime = metadata.CreateTime
 }
 
+// TODO: EOL this in favor of setUpdateMetadata
 func newUpdateMetadata(current *ateapipb.ResourceMetadata) *ateapipb.ResourceMetadata {
 	next := proto.Clone(current).(*ateapipb.ResourceMetadata)
 	next.Version = current.GetVersion() + 1
 	next.UpdateTime = timestamppb.Now()
 	return next
+}
+
+func setUpdateMetadata(oldMeta, newMeta *ateapipb.ResourceMetadata) {
+	newMeta.Uid = oldMeta.Uid
+	newMeta.Version = oldMeta.Version + 1
+	newMeta.CreateTime = oldMeta.CreateTime
+	newMeta.UpdateTime = timestamppb.Now()
 }

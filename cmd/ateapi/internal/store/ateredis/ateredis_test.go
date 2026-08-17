@@ -288,22 +288,14 @@ func TestUpdateActor_DiscardsServerOwnedFieldsEdits(t *testing.T) {
 // not touch. Unlike the server-owned metadata, which is silently restored,
 // these fail the call: a caller that renamed an actor or repointed its template
 // asked for something the store cannot do, and must hear about it.
+// TODO: This whole test should be removed once all validation moves to
+// the serviceImpl layer instead of storage
 func TestUpdateActor_RejectsImmutableFieldChange(t *testing.T) {
 	tests := []struct {
 		name      string
 		mutate    func(toUpdate *ateapipb.Actor)
 		wantField string
 	}{
-		{
-			name:      "atespace",
-			mutate:    func(toUpdate *ateapipb.Actor) { toUpdate.Metadata.Atespace = "other-atespace" },
-			wantField: "metadata.atespace",
-		},
-		{
-			name:      "name",
-			mutate:    func(toUpdate *ateapipb.Actor) { toUpdate.Metadata.Name = "other-name" },
-			wantField: "metadata.name",
-		},
 		{
 			name:      "actor template namespace",
 			mutate:    func(toUpdate *ateapipb.Actor) { toUpdate.ActorTemplateNamespace = "other-ns" },
