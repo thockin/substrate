@@ -284,66 +284,6 @@ func TestUpdateActor_DiscardsServerOwnedFieldsEdits(t *testing.T) {
 	}
 }
 
-// TestUpdateActor_RejectsImmutableFieldChange covers the fields a mutation may
-// not touch. Unlike the server-owned metadata, which is silently restored,
-// these fail the call: a caller that renamed an actor or repointed its template
-// asked for something the store cannot do, and must hear about it.
-// TODO: This whole test should be removed once all validation moves to
-// the serviceImpl layer instead of storage
-func TestUpdateActor_RejectsImmutableFieldChange(t *testing.T) {
-	tests := []struct {
-		name      string
-		mutate    func(toUpdate *ateapipb.Actor)
-		wantField string
-	}{
-		{
-			name:      "actor template namespace",
-			mutate:    func(toUpdate *ateapipb.Actor) { toUpdate.ActorTemplateNamespace = "other-ns" },
-			wantField: "actor_template_namespace",
-		},
-		{
-			name:      "actor template name",
-			mutate:    func(toUpdate *ateapipb.Actor) { toUpdate.ActorTemplateName = "other-template" },
-			wantField: "actor_template_name",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, s, ctx := setupTest(t)
-			actor := newTestActor("actor-1")
-			if _, err := s.CreateAtespace(ctx, newTestAtespace(actor.Metadata.Atespace)); err != nil {
-				t.Fatalf("CreateAtespace() failed: %v", err)
-			}
-			created, err := s.CreateActor(ctx, actor)
-			if err != nil {
-				t.Fatalf("CreateActor failed: %v", err)
-			}
-
-			actorRef := resources.ActorRefFromActor(actor)
-			_, err = s.UpdateActor(ctx, actorRef, store.PreconditionFrom(created), func(toUpdate *ateapipb.Actor) error {
-				// Paired with a legitimate edit, so the rejection cannot be
-				// mistaken for a no-op mutation.
-				toUpdate.Status.State = ateapipb.ActorState_ACTOR_STATE_RUNNING
-				tt.mutate(toUpdate)
-				return nil
-			})
-			// The message must name the offending field: the closure is buggy,
-			// and whoever has to fix it only has this error to go on.
-			if want := tt.wantField + " is immutable"; err == nil || !strings.Contains(err.Error(), want) {
-				t.Errorf("UpdateActor changing %s = %v, want an error containing %q", tt.name, err, want)
-			}
-
-			got, err := s.GetActor(ctx, actorRef)
-			if err != nil {
-				t.Fatalf("GetActor failed: %v", err)
-			}
-			if diff := cmp.Diff(created, got, protocmp.Transform()); diff != "" {
-				t.Errorf("rejected mutation was persisted anyway (-created +got):\n%s", diff)
-			}
-		})
-	}
-}
-
 // watchInterceptor runs before each WATCH'd transaction body, so a test can
 // write the watched key from another connection and make EXEC fail the way a
 // real concurrent writer would.

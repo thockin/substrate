@@ -31,7 +31,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/operation"
-	"k8s.io/apimachinery/pkg/api/validate/content"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
@@ -205,26 +204,11 @@ func validateCreateActorRequest(ctx context.Context, req *ateapipb.CreateActorRe
 	errs := Validate_CreateActorRequest(ctx, op, nil, req, nil)
 
 	actor := req.GetActor()
-	actorPath := fldPath.Child("actor")
 	if actor == nil {
 		// handled by DV
 		return errs
 	}
-
-	if val, p := actor.GetActorTemplateNamespace(), actorPath.Child("actor_template_namespace"); val == "" {
-		errs = append(errs, field.Required(p, ""))
-	} else {
-		for _, msg := range content.IsDNS1123Label(val) {
-			errs = append(errs, field.Invalid(p, val, msg))
-		}
-	}
-	if val, p := actor.GetActorTemplateName(), actorPath.Child("actor_template_name"); val == "" {
-		errs = append(errs, field.Required(p, ""))
-	} else {
-		for _, msg := range content.IsDNS1123Subdomain(val) {
-			errs = append(errs, field.Invalid(p, val, msg))
-		}
-	}
+	actorPath := fldPath.Child("actor")
 
 	if tag := actor.GetSourceSnapshotTag(); tag != nil {
 		errs = append(errs, resources.ValidateObjectRef(tag, actorPath.Child("source_snapshot_tag"))...)
