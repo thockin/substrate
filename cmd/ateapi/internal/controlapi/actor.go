@@ -197,24 +197,9 @@ func (s *ServiceImpl) resolveSnapshotSource(ctx context.Context, actorAtespace s
 }
 
 func validateCreateActorRequest(ctx context.Context, req *ateapipb.CreateActorRequest) field.ErrorList {
-	var fldPath *field.Path
-
 	// Call the generated validation.
 	op := operation.Operation{Type: operation.Create, Options: map[string]bool{"validateOutput": false}}
-	errs := Validate_CreateActorRequest(ctx, op, nil, req, nil)
-
-	actor := req.GetActor()
-	if actor == nil {
-		// handled by DV
-		return errs
-	}
-	actorPath := fldPath.Child("actor")
-
-	if tag := actor.GetSourceSnapshotTag(); tag != nil {
-		errs = append(errs, resources.ValidateObjectRef(tag, actorPath.Child("source_snapshot_tag"))...)
-	}
-
-	return errs
+	return Validate_CreateActorRequest(ctx, op, nil, req, nil)
 }
 
 func (s *RPCService) GetActor(ctx context.Context, req *ateapipb.GetActorRequest) (*ateapipb.Actor, error) {

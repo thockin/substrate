@@ -1036,18 +1036,6 @@ func (s *Persistence) DeleteActor(ctx context.Context, actorRef resources.ActorR
 	return deleted, nil
 }
 
-// validateUpdateActorMutation reports whether an actor mutation left the fields it does
-// not own alone.
-func validateUpdateActorMutation(storedActor, mutatedActor *ateapipb.Actor) error {
-	if stored, mutated := storedActor.GetActorTemplate(), mutatedActor.GetActorTemplate(); !proto.Equal(stored, mutated) {
-		return fmt.Errorf("actor_template is immutable: mutation changed it from %v to %v", stored, mutated)
-	}
-	if stored, mutated := storedActor.GetSourceSnapshotTag(), mutatedActor.GetSourceSnapshotTag(); !proto.Equal(stored, mutated) {
-		return fmt.Errorf("source_snapshot_tag is immutable: mutation changed it from %v to %v", stored, mutated)
-	}
-	return nil
-}
-
 // updateMaxAttempts bounds how many times UpdateActor or UpdateActorTemplate re-runs its
 // read-modify-write after a concurrent writer invalidates the transaction.
 const updateMaxAttempts = 5
@@ -1089,10 +1077,6 @@ func (s *Persistence) UpdateActor(ctx context.Context, actorRef resources.ActorR
 			if err := mutate(currentActor); err != nil {
 				abortErr = err
 				return err
-			}
-			if err := validateUpdateActorMutation(actorBeforeMutation, currentActor); err != nil {
-				abortErr = fmt.Errorf("%w: %w", store.ErrImmutableField, err)
-				return abortErr
 			}
 			// The stored metadata is authoritative; derive the next metadata
 			// from it, discarding whatever mutate made of it.
