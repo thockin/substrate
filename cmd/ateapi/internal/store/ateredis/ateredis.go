@@ -1071,16 +1071,14 @@ func (s *Persistence) UpdateActor(ctx context.Context, actorRef resources.ActorR
 
 			// Snapshot the stored state before handing the actor to mutate.
 			// mutate is free to edit anything it is given.
-			//FIXME: the mutate function has to do a clone to call validation,
-			//       so this is redundant. Can we get rid of one?
-			actorBeforeMutation := proto.Clone(currentActor).(*ateapipb.Actor)
+			oldMeta := proto.CloneOf(currentActor.Metadata)
 			if err := mutate(currentActor); err != nil {
 				abortErr = err
 				return err
 			}
 			// The stored metadata is authoritative; derive the next metadata
 			// from it, discarding whatever mutate made of it.
-			setUpdateMetadata(actorBeforeMutation.Metadata, currentActor.Metadata)
+			setUpdateMetadata(currentActor.Metadata, oldMeta)
 
 			newVal, err := protojson.Marshal(currentActor)
 			if err != nil {
@@ -1488,7 +1486,7 @@ func newUpdateMetadata(current *ateapipb.ResourceMetadata) *ateapipb.ResourceMet
 	return next
 }
 
-func setUpdateMetadata(oldMeta, newMeta *ateapipb.ResourceMetadata) {
+func setUpdateMetadata(newMeta, oldMeta *ateapipb.ResourceMetadata) {
 	newMeta.Uid = oldMeta.Uid
 	newMeta.Version = oldMeta.Version + 1
 	newMeta.CreateTime = oldMeta.CreateTime
