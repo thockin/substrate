@@ -112,6 +112,7 @@ func ValidateUpdateMetadataRef(meta *ateapipb.ResourceMetadata, fldPath *field.P
 // well-formed: its atespace must be empty (global resources do not belong to an
 // atespace) and its name must be a valid resource name. It does not check that
 // the referenced resource actually exists.
+// TODO: EOL this when DV is fully implemented
 func ValidateGlobalObjectRef(ref *ateapipb.ObjectRef, fldPath *field.Path) field.ErrorList {
 	if ref == nil {
 		return nil
