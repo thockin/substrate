@@ -160,3 +160,13 @@ func newServiceImpl(
 	}
 	return s
 }
+
+// Pass-through.
+func (si *ServiceImpl) AcquireLock(ctx context.Context, key string) (*store.Lock, error) {
+	return si.Interface.AcquireLock(ctx, key)
+}
+
+// Pass-through.
+func (si *ServiceImpl) DebugClearAll(ctx context.Context) error {
+	return si.Interface.DebugClearAll(ctx)
+}
