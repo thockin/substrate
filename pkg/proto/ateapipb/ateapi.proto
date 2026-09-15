@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-syntax = "proto3";
+edition = "2024";
 
 package ateapi;
 
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
+import option "google/protobuf/go_features.proto";
 
 option go_package = "github.com/agent-substrate/substrate/pkg/proto/ateapipb";
+option features.(pb.go).strip_enum_prefix = STRIP_ENUM_PREFIX_STRIP;
+option features.(pb.go).api_level = API_OPEN;
+option features.default_symbol_visibility = EXPORT_TOP_LEVEL;
+option features.field_presence = IMPLICIT;
 
 // Control is the primary RPC interface for Agentic Substrate.
 service Control {

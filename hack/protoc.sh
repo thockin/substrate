@@ -17,11 +17,11 @@
 set -o errexit -o nounset -o pipefail
 
 # pin protoc version and binary hashes
-PROTOC_VERSION="25.3"
-linux_x86_64_EXPECTED_SHA="f853e691868d0557425ea290bf7ba6384eef2fa9b04c323afab49a770ba9da80"
-linux_aarch_64_EXPECTED_SHA="9eae1f20f70cccc912d1c318c3929b86aebf5afd4b0f32c196ef682c222ed5ae"
-osx_x86_64_EXPECTED_SHA="247e003b8e115405172eacc50bd19825209d85940728e766f0848eee7c80e2a1"
-osx_aarch_64_EXPECTED_SHA="d0fcd6d3b3ef6f22f1c47cc30a80c06727e1eccdddcaf0f4a3be47c070ffd3fe"
+PROTOC_VERSION="36.1"
+linux_x86_64_EXPECTED_SHA="c4bc672d9d49214dc8cafdceadf4df92182d6ca8e3ec65a56b2d7de5602669b4"
+linux_aarch_64_EXPECTED_SHA="237a68856edf1bd28b6204bddd0596c1cf46d298bc29c620012540b2e44c73e7"
+osx_x86_64_EXPECTED_SHA="ee2c5496e4af0aa6a224894bc0f7025145260e004d890487d510725ce8b473eb"
+osx_aarch_64_EXPECTED_SHA="de56d57afe30c5d191b11d24ff93dd4025728d7fb43b773886b2d3613e0bdbb2"
 
 # Determine OS and Arch for protoc release
 # Standard releases: linux-x86_64, osx-x86_64, osx-aarch_64
@@ -48,6 +48,7 @@ OUT_DIR="$(dirname "$0")/../bin/protoc-install"
 PROTOC_BIN="$OUT_DIR/bin/protoc"
 
 
+#FIXME: check version
 if [ ! -f "$PROTOC_BIN" ]; then
   echo "Downloading protoc v${PROTOC_VERSION} for ${PROTOC_PLATFORM}..."
   mkdir -p "$OUT_DIR"
