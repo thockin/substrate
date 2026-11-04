@@ -12,12 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// The worker outbox: worker writes append one event row to the
-// range-partitioned, UNLOGGED worker_outbox table in the same transaction
-// (inWorkerTx), per-replica watchers poll it with an xmin-fenced
-// xid cursor (WatchWorkers), and a background loop pre-creates partitions
-// and retires old ones by dropping them, recording a trim high-water mark
-// that lets lagging watchers detect loss and resync (outboxMaintenance).
+// The worker outbox carries Worker change events to every replica's watchers.
+//
+//   - Writing: every transaction that writes a Worker appends exactly one event
+//     row to worker_outbox, in the same transaction (inWorkerTx).
+//   - Reading: each watcher polls rows past its xid cursor, but only below the
+//     oldest running transaction's xid, so a transaction that commits late
+//     cannot land behind the cursor (WatchWorkers).
+//   - Retention: worker_outbox is UNLOGGED and range-partitioned on created_at.
+//     The maintenance loop creates partitions ahead of the clock, drops expired
+//     ones, and records the greatest xid it discarded in worker_outbox_trim, so
+//     a watcher that had not read that far closes and its consumer relists
+//     (maintainOutbox).
 
 package atepg
 
@@ -198,30 +204,34 @@ const pollSafetySQL = `
 		WHERE xid > $1::xid8 AND xid > $2::xid8),
 	pg_postmaster_start_time()::text`
 
-// maintainWorkerOutboxPartitions runs one maintenance pass. Partition creation
-// is unelected. DEFAULT truncate and partition drops run in SEPARATE elected
-// transactions to prevent AB/BA deadlocks against writers.
-func (p *Persistence) maintainWorkerOutboxPartitions(ctx context.Context) error {
+// maintainOutbox runs one maintenance pass: it creates the partitions for now
+// through the lead, truncates the DEFAULT partition if writes spilled into it,
+// and drops expired partitions. Creation is idempotent and runs on every
+// replica. The truncate and the drops each run in their own transaction, won
+// by one replica through an advisory lock. Keeping them apart avoids a lock
+// order deadlock with writers: the truncate locks the DEFAULT child and the
+// drops lock the parent, and writers lock parent then child.
+func (p *Persistence) maintainOutbox(ctx context.Context) error {
 	// Must use the database's clock. App-sourced time would let a fast-clocked
 	// replica accidentally drift partition bounds and shorten retention.
 	now, err := p.outboxNow(ctx)
 	if err != nil {
 		return err
 	}
-	if err := p.createWorkerOutboxPartitions(ctx, outboxPartitionLeadTimes(now)...); err != nil {
+	if err := p.createOutboxPartitions(ctx, outboxPartitionLeadTimes(now)...); err != nil {
 		return err
 	}
 
-	if err := p.retireStrayedOutboxDefault(ctx); err != nil {
+	if err := p.truncateOutboxDefaultIfNonEmpty(ctx); err != nil {
 		return err
 	}
-	return p.dropExpiredOutboxRetention(ctx, now)
+	return p.dropExpiredOutboxPartitions(ctx, now)
 }
 
-// retireStrayedOutboxDefault truncates a non-empty DEFAULT partition in its
+// truncateOutboxDefaultIfNonEmpty truncates a non-empty DEFAULT partition in its
 // own elected transaction. Locks touched: DEFAULT child only — never the
-// parent (see maintainWorkerOutboxPartitions on deadlock ordering).
-func (p *Persistence) retireStrayedOutboxDefault(ctx context.Context) error {
+// parent (see maintainOutbox on deadlock ordering).
+func (p *Persistence) truncateOutboxDefaultIfNonEmpty(ctx context.Context) error {
 	tx, err := p.ownerPool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning outbox stray-cleanup transaction: %w", err)
@@ -253,7 +263,7 @@ func (p *Persistence) retireStrayedOutboxDefault(ctx context.Context) error {
 		return nil
 	}
 	slog.WarnContext(ctx, "outbox DEFAULT partition is non-empty; partition creation has stalled and writes are detouring")
-	if err := p.truncateWorkerOutboxDefault(ctx, tx); err != nil {
+	if err := p.truncateOutboxDefault(ctx, tx); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -262,11 +272,11 @@ func (p *Persistence) retireStrayedOutboxDefault(ctx context.Context) error {
 	return nil
 }
 
-// dropExpiredOutboxRetention drops aged-out partitions in its own elected
+// dropExpiredOutboxPartitions drops aged-out partitions in its own elected
 // transaction. Locks touched: parent (ACCESS EXCLUSIVE, blocking every
 // worker write's outbox append) plus the dropped children — never the
 // DEFAULT while waiting on the parent.
-func (p *Persistence) dropExpiredOutboxRetention(ctx context.Context, now time.Time) error {
+func (p *Persistence) dropExpiredOutboxPartitions(ctx context.Context, now time.Time) error {
 	tx, err := p.ownerPool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning outbox retention transaction: %w", err)
@@ -285,7 +295,7 @@ func (p *Persistence) dropExpiredOutboxRetention(ctx context.Context, now time.T
 	}
 	// Drops run last in the pass with commit immediately after, keeping the
 	// writer-blocking window minimal.
-	if err := p.dropExpiredWorkerOutboxPartitions(ctx, tx, now); err != nil {
+	if err := p.dropOutboxPartitionsExpiredAt(ctx, tx, now); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -294,8 +304,8 @@ func (p *Persistence) dropExpiredOutboxRetention(ctx context.Context, now time.T
 	return nil
 }
 
-// workerOutboxPartitionName names the partition covering the given instant.
-func workerOutboxPartitionName(at time.Time) string {
+// outboxPartitionName names the partition covering the given instant.
+func outboxPartitionName(at time.Time) string {
 	// it truncates to the partition boundary itself so callers can pass any moment within the range.
 	return "worker_outbox_p" + at.UTC().Truncate(outboxPartitionInterval).Format("200601021504")
 }
@@ -309,25 +319,25 @@ func outboxPartitionLeadTimes(now time.Time) []time.Time {
 	return times
 }
 
-// createWorkerOutboxPartitions idempotently creates partitions.
+// createOutboxPartitions idempotently creates partitions.
 // If writes spilled into DEFAULT, CREATE PARTITION fails (23514). We catch
 // this, TRUNCATE the strays (triggering watcher resyncs), and run CREATE
 // PARTITION inside the SAME transaction to safely un-wedge the system.
-func (p *Persistence) createWorkerOutboxPartitions(ctx context.Context, instants ...time.Time) error {
-	err := p.tryCreateWorkerOutboxPartitions(ctx, false, instants...)
+func (p *Persistence) createOutboxPartitions(ctx context.Context, instants ...time.Time) error {
+	err := p.createOutboxPartitionsOnce(ctx, false, instants...)
 	if err == nil || !isCheckViolation(err) {
 		return err
 	}
 	slog.WarnContext(ctx, "outbox DEFAULT partition holds rows in a range being created; truncating strays to un-wedge partition creation",
 		slog.Any("err", err))
-	return p.tryCreateWorkerOutboxPartitions(ctx, true, instants...)
+	return p.createOutboxPartitionsOnce(ctx, true, instants...)
 }
 
 // isCheckViolation matches SQLSTATE 23514, which CREATE ... PARTITION OF
 // raises when the DEFAULT partition holds rows inside the new range.
 func isCheckViolation(err error) bool { return pgErrCode(err) == "23514" }
 
-func (p *Persistence) tryCreateWorkerOutboxPartitions(ctx context.Context, truncateStrays bool, instants ...time.Time) error {
+func (p *Persistence) createOutboxPartitionsOnce(ctx context.Context, truncateStrays bool, instants ...time.Time) error {
 	tx, err := p.ownerPool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning outbox partition transaction: %w", err)
@@ -348,7 +358,7 @@ func (p *Persistence) tryCreateWorkerOutboxPartitions(ctx context.Context, trunc
 		if _, err := tx.Exec(ctx, `LOCK TABLE worker_outbox IN ACCESS EXCLUSIVE MODE`); err != nil {
 			return fmt.Errorf("locking outbox parent for stray rescue: %w", err)
 		}
-		if err := p.truncateWorkerOutboxDefault(ctx, tx); err != nil {
+		if err := p.truncateOutboxDefault(ctx, tx); err != nil {
 			return err
 		}
 	}
@@ -358,7 +368,7 @@ func (p *Persistence) tryCreateWorkerOutboxPartitions(ctx context.Context, trunc
 		// autovacuum off: partitions are insert-only and discarded whole,
 		// so autovacuum is unnecessary and its scans would cause latency spikes.
 		stmt := fmt.Sprintf(`CREATE UNLOGGED TABLE IF NOT EXISTS %s PARTITION OF worker_outbox FOR VALUES FROM ('%s') TO ('%s') WITH (autovacuum_enabled = off)`,
-			workerOutboxPartitionName(start), start.Format(time.RFC3339), start.Add(outboxPartitionInterval).Format(time.RFC3339))
+			outboxPartitionName(start), start.Format(time.RFC3339), start.Add(outboxPartitionInterval).Format(time.RFC3339))
 		if _, err := tx.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("creating outbox partition for %s: %w", start, err)
 		}
@@ -369,9 +379,9 @@ func (p *Persistence) tryCreateWorkerOutboxPartitions(ctx context.Context, trunc
 	return nil
 }
 
-// dropExpiredWorkerOutboxPartitions drops every outbox partition whose
+// dropOutboxPartitionsExpiredAt drops every outbox partition whose
 // entire range is older than retention.
-func (p *Persistence) dropExpiredWorkerOutboxPartitions(ctx context.Context, q querier, now time.Time) error {
+func (p *Persistence) dropOutboxPartitionsExpiredAt(ctx context.Context, q querier, now time.Time) error {
 	rows, err := q.Query(ctx, `
 		SELECT child.relname FROM pg_inherits i
 		JOIN pg_class child ON child.oid = i.inhrelid
@@ -409,16 +419,16 @@ func (p *Persistence) dropExpiredWorkerOutboxPartitions(ctx context.Context, q q
 		if now.Sub(start.Add(outboxPartitionInterval)) < outboxRetentionAge {
 			continue
 		}
-		if err := p.dropWorkerOutboxPartition(ctx, q, name); err != nil {
+		if err := p.dropOutboxPartition(ctx, q, name); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// dropWorkerOutboxPartition records the trim mark and drops the
+// dropOutboxPartition records the trim mark and drops the
 // partition on the caller's (elected, single) retention transaction.
-func (p *Persistence) dropWorkerOutboxPartition(ctx context.Context, q querier, name string) error {
+func (p *Persistence) dropOutboxPartition(ctx context.Context, q querier, name string) error {
 	ident := pgx.Identifier{name}.Sanitize()
 	// The mark is the partition's greatest xid.
 	if _, err := q.Exec(ctx, fmt.Sprintf(`
@@ -434,9 +444,9 @@ func (p *Persistence) dropWorkerOutboxPartition(ctx context.Context, q querier, 
 	return nil
 }
 
-// truncateWorkerOutboxDefault discards the DEFAULT partition wholesale to
+// truncateOutboxDefault discards the DEFAULT partition wholesale to
 // un-stall partition creation.
-func (p *Persistence) truncateWorkerOutboxDefault(ctx context.Context, q querier) error {
+func (p *Persistence) truncateOutboxDefault(ctx context.Context, q querier) error {
 	// Lock BEFORE reading the trim mark to block concurrent writers. This ensures
 	// our snapshot sees exactly what TRUNCATE will destroy, preventing silent data loss.
 	if _, err := q.Exec(ctx, `LOCK TABLE worker_outbox_default IN ACCESS EXCLUSIVE MODE`); err != nil {

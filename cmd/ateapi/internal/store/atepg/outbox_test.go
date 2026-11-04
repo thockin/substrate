@@ -254,7 +254,7 @@ func TestWorkerOutboxPartitionRetention(t *testing.T) {
 
 	// A partition two hours back, holding one aged event.
 	stale := time.Now().UTC().Add(-2 * time.Hour)
-	if err := s.createWorkerOutboxPartitions(ctx, stale); err != nil {
+	if err := s.createOutboxPartitions(ctx, stale); err != nil {
 		t.Fatalf("creating stale partition failed: %v", err)
 	}
 	var staleXid string
@@ -271,17 +271,17 @@ func TestWorkerOutboxPartitionRetention(t *testing.T) {
 		t.Fatalf("inserting fresh row failed: %v", err)
 	}
 
-	if err := s.maintainWorkerOutboxPartitions(ctx); err != nil {
-		t.Fatalf("maintainWorkerOutboxPartitions failed: %v", err)
+	if err := s.maintainOutbox(ctx); err != nil {
+		t.Fatalf("maintainOutbox failed: %v", err)
 	}
 
 	var staleExists bool
 	if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`,
-		workerOutboxPartitionName(stale)).Scan(&staleExists); err != nil {
+		outboxPartitionName(stale)).Scan(&staleExists); err != nil {
 		t.Fatalf("checking stale partition failed: %v", err)
 	}
 	if staleExists {
-		t.Errorf("stale partition %s still exists, want dropped", workerOutboxPartitionName(stale))
+		t.Errorf("stale partition %s still exists, want dropped", outboxPartitionName(stale))
 	}
 	var remaining int
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM worker_outbox`).Scan(&remaining); err != nil {
@@ -308,7 +308,7 @@ func TestOutboxMaintenance_SingleMaintainer(t *testing.T) {
 	ctx := context.Background()
 
 	stale := time.Now().UTC().Add(-2 * time.Hour)
-	if err := s.createWorkerOutboxPartitions(ctx, stale); err != nil {
+	if err := s.createOutboxPartitions(ctx, stale); err != nil {
 		t.Fatalf("creating stale partition failed: %v", err)
 	}
 
@@ -323,11 +323,11 @@ func TestOutboxMaintenance_SingleMaintainer(t *testing.T) {
 		t.Fatalf("taking maintenance lock failed: %v", err)
 	}
 
-	if err := s.maintainWorkerOutboxPartitions(ctx); err != nil {
+	if err := s.maintainOutbox(ctx); err != nil {
 		t.Fatalf("pass with lock held must skip cleanly, got: %v", err)
 	}
 	var staleExists bool
-	if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, workerOutboxPartitionName(stale)).Scan(&staleExists); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, outboxPartitionName(stale)).Scan(&staleExists); err != nil {
 		t.Fatalf("checking stale partition failed: %v", err)
 	}
 	if !staleExists {
@@ -337,10 +337,10 @@ func TestOutboxMaintenance_SingleMaintainer(t *testing.T) {
 	if err := holder.Rollback(ctx); err != nil {
 		t.Fatalf("releasing maintenance lock failed: %v", err)
 	}
-	if err := s.maintainWorkerOutboxPartitions(ctx); err != nil {
+	if err := s.maintainOutbox(ctx); err != nil {
 		t.Fatalf("pass after lock release failed: %v", err)
 	}
-	if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, workerOutboxPartitionName(stale)).Scan(&staleExists); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, outboxPartitionName(stale)).Scan(&staleExists); err != nil {
 		t.Fatalf("re-checking stale partition failed: %v", err)
 	}
 	if staleExists {
@@ -531,7 +531,7 @@ func TestOutboxMaintenance_ConcurrentPassesAreHarmless(t *testing.T) {
 	t.Cleanup(replica.Close)
 
 	stale := time.Now().UTC().Add(-2 * time.Hour)
-	if err := s.createWorkerOutboxPartitions(ctx, stale); err != nil {
+	if err := s.createOutboxPartitions(ctx, stale); err != nil {
 		t.Fatalf("creating stale partition failed: %v", err)
 	}
 
@@ -541,7 +541,7 @@ func TestOutboxMaintenance_ConcurrentPassesAreHarmless(t *testing.T) {
 		wg.Add(1)
 		go func(i int, p *Persistence) {
 			defer wg.Done()
-			errs[i] = p.maintainWorkerOutboxPartitions(ctx)
+			errs[i] = p.maintainOutbox(ctx)
 		}(i, p)
 	}
 	wg.Wait()
@@ -551,7 +551,7 @@ func TestOutboxMaintenance_ConcurrentPassesAreHarmless(t *testing.T) {
 		}
 	}
 	var staleExists bool
-	if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, workerOutboxPartitionName(stale)).Scan(&staleExists); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, outboxPartitionName(stale)).Scan(&staleExists); err != nil {
 		t.Fatalf("checking stale partition failed: %v", err)
 	}
 	if staleExists {
@@ -709,7 +709,7 @@ func TestPartitionCreation_UnwedgesFromStrayedDefault(t *testing.T) {
 	}
 
 	// Simulate the stall: the current range's partition does not exist.
-	if _, err := s.pool.Exec(ctx, `DROP TABLE `+workerOutboxPartitionName(now)); err != nil {
+	if _, err := s.pool.Exec(ctx, `DROP TABLE `+outboxPartitionName(now)); err != nil {
 		t.Fatalf("dropping current partition: %v", err)
 	}
 	// A write during the stall detours into DEFAULT.
@@ -732,8 +732,8 @@ func TestPartitionCreation_UnwedgesFromStrayedDefault(t *testing.T) {
 
 	// The stall clears: creation must dig itself out (pre-fix this returned
 	// SQLSTATE 23514 forever, and NewPersistence failed the same way).
-	if err := s.createWorkerOutboxPartitions(ctx, outboxPartitionLeadTimes(now)...); err != nil {
-		t.Fatalf("createWorkerOutboxPartitions did not un-wedge: %v", err)
+	if err := s.createOutboxPartitions(ctx, outboxPartitionLeadTimes(now)...); err != nil {
+		t.Fatalf("createOutboxPartitions did not un-wedge: %v", err)
 	}
 
 	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM worker_outbox_default)`).Scan(&strays); err != nil {
@@ -743,7 +743,7 @@ func TestPartitionCreation_UnwedgesFromStrayedDefault(t *testing.T) {
 		t.Fatal("DEFAULT partition still holds strays after the rescue")
 	}
 	var partitionExists bool
-	if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, workerOutboxPartitionName(now)).Scan(&partitionExists); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, outboxPartitionName(now)).Scan(&partitionExists); err != nil {
 		t.Fatalf("checking recreated partition: %v", err)
 	}
 	if !partitionExists {
@@ -780,7 +780,7 @@ func TestOutboxMaintenance_NoDeadlockWithConcurrentWriters(t *testing.T) {
 
 	// An aged-out partition with a row, so the drops leg has real work.
 	old := now.Add(-2*outboxRetentionAge - 2*outboxPartitionInterval)
-	if err := s.createWorkerOutboxPartitions(ctx, old); err != nil {
+	if err := s.createOutboxPartitions(ctx, old); err != nil {
 		t.Fatalf("creating expired partition: %v", err)
 	}
 	if _, err := s.pool.Exec(ctx, `INSERT INTO worker_outbox (created_at, payload) VALUES ($1, $2)`,
@@ -819,11 +819,11 @@ func TestOutboxMaintenance_NoDeadlockWithConcurrentWriters(t *testing.T) {
 	// rescue-create, stray cleanup, and drops, all with writers in flight.
 	for i := 0; i < 4; i++ {
 		if _, err := s.pool.Exec(ctx,
-			`DO $$ BEGIN LOCK TABLE worker_outbox IN ACCESS EXCLUSIVE MODE; EXECUTE 'DROP TABLE IF EXISTS `+workerOutboxPartitionName(time.Now().UTC())+`'; END $$`); err != nil {
+			`DO $$ BEGIN LOCK TABLE worker_outbox IN ACCESS EXCLUSIVE MODE; EXECUTE 'DROP TABLE IF EXISTS `+outboxPartitionName(time.Now().UTC())+`'; END $$`); err != nil {
 			t.Fatalf("dropping current partition (iteration %d): %v", i, err)
 		}
 		time.Sleep(150 * time.Millisecond) // let writers detour into DEFAULT
-		if err := s.maintainWorkerOutboxPartitions(ctx); err != nil {
+		if err := s.maintainOutbox(ctx); err != nil {
 			t.Fatalf("maintenance pass %d failed under concurrent writers: %v", i, err)
 		}
 	}
@@ -844,7 +844,7 @@ func TestOutboxMaintenance_NoDeadlockWithConcurrentWriters(t *testing.T) {
 		t.Fatal("DEFAULT partition still holds strays after maintenance")
 	}
 	var oldExists bool
-	if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, workerOutboxPartitionName(old)).Scan(&oldExists); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, outboxPartitionName(old)).Scan(&oldExists); err != nil {
 		t.Fatalf("checking expired partition: %v", err)
 	}
 	if oldExists {
@@ -953,7 +953,7 @@ func TestWatchWorkers_BaselineDoesNotMaskOwedTrims(t *testing.T) {
 	}
 
 	// Retention drops W's partition while the fence still stalls: record the
-	// trim exactly as dropWorkerOutboxPartition would.
+	// trim exactly as dropOutboxPartition would.
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO worker_outbox_trim (xid) VALUES ($1::xid8)
 		ON CONFLICT (id) DO UPDATE SET xid = EXCLUDED.xid
@@ -1183,14 +1183,14 @@ func TestOutboxMaintenance_GivesUpOnABlockedLock(t *testing.T) {
 	ddlCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	future := time.Now().UTC().Add(24 * time.Hour)
-	err = s.createWorkerOutboxPartitions(ddlCtx, future)
+	err = s.createOutboxPartitions(ddlCtx, future)
 	if got := pgErrCode(err); got != "55P03" {
-		t.Fatalf("createWorkerOutboxPartitions under a held lock = %v (SQLSTATE %q), want lock_not_available (55P03)", err, got)
+		t.Fatalf("createOutboxPartitions under a held lock = %v (SQLSTATE %q), want lock_not_available (55P03)", err, got)
 	}
 
 	// A partition that already exists takes no lock, so maintenance of the
 	// current range still succeeds while the reader holds on.
-	if err := s.createWorkerOutboxPartitions(ddlCtx, time.Now().UTC()); err != nil {
-		t.Errorf("createWorkerOutboxPartitions for an existing partition = %v, want nil", err)
+	if err := s.createOutboxPartitions(ddlCtx, time.Now().UTC()); err != nil {
+		t.Errorf("createOutboxPartitions for an existing partition = %v, want nil", err)
 	}
 }

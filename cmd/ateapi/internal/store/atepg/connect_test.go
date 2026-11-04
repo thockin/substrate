@@ -251,7 +251,7 @@ func TestConnectUsesConfiguredSchema(t *testing.T) {
 		t.Error("migration removed an unrelated table")
 	}
 
-	if err := persistence.dropExpiredWorkerOutboxPartitions(ctx, persistence.ownerPool, time.Now()); err != nil {
+	if err := persistence.dropOutboxPartitionsExpiredAt(ctx, persistence.ownerPool, time.Now()); err != nil {
 		t.Fatalf("dropping expired partitions in the configured schema: %v", err)
 	}
 	var unrelatedPartitionExists bool
@@ -368,7 +368,7 @@ func TestConnectSeparatesRuntimeAndDDLPrivileges(t *testing.T) {
 	if err := p.pool.QueryRow(ctx, `SELECT has_table_privilege(current_user, 'schema_migrations', 'UPDATE')`).Scan(&canUpdateLedger); err != nil || !canUpdateLedger {
 		t.Fatalf("read/write role lacks default table privileges on migration ledger: %v", err)
 	}
-	if err := p.createWorkerOutboxPartitions(ctx, time.Now().Add(24*time.Hour)); err != nil {
+	if err := p.createOutboxPartitions(ctx, time.Now().Add(24*time.Hour)); err != nil {
 		t.Fatalf("owner maintenance failed: %v", err)
 	}
 
