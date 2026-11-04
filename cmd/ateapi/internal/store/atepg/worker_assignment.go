@@ -218,55 +218,18 @@ func (p *Persistence) GetWorkerAssignment(ctx context.Context, workerName, actor
 }
 
 func (p *Persistence) ListWorkerAssignments(ctx context.Context, workerName string, opts store.ListOptions) (store.ListResponse[*ateapi.ActorAssignment], error) {
-	opts, err := store.NormalizeListOptions(opts)
-	if err != nil {
-		return store.ListResponse[*ateapi.ActorAssignment]{}, err
-	}
-	pageSize := opts.PageSize
-	// The token is scoped to the Worker, so one cannot be replayed against
-	// another Worker's assignments.
-	token, err := decodePageToken(opts.PageToken, kindWorkerAssign, workerName, 1)
-	if err != nil {
-		return store.ListResponse[*ateapi.ActorAssignment]{}, err
-	}
-	var last *string
-	if len(token.Last) > 0 {
-		last = &token.Last[0]
-	}
-
-	rows, err := p.pool.Query(ctx, `
-		SELECT actor_uid, proto FROM worker_assignments
-		WHERE worker_name = $1 AND ($2::text IS NULL OR actor_uid > $2)
-		ORDER BY actor_uid
-		LIMIT $3`, workerName, last, int64(pageSize)+1)
-	if err != nil {
-		return store.ListResponse[*ateapi.ActorAssignment]{}, fmt.Errorf("listing assignments of worker %s: %w", workerName, err)
-	}
-	defer rows.Close()
-
-	var uids []string
-	var result []*ateapi.ActorAssignment
-	for rows.Next() {
-		var actorUID string
-		var protoBytes []byte
-		if err := rows.Scan(&actorUID, &protoBytes); err != nil {
-			return store.ListResponse[*ateapi.ActorAssignment]{}, fmt.Errorf("scanning assignment of worker %s: %w", workerName, err)
-		}
-		var assignment ateapi.ActorAssignment
-		if err := unmarshalStored(protoBytes, &assignment); err != nil {
-			return store.ListResponse[*ateapi.ActorAssignment]{}, fmt.Errorf("unmarshaling assignment of actor %s: %w", actorUID, err)
-		}
-		result = append(result, &assignment)
-		uids = append(uids, actorUID)
-	}
-	if err := rows.Err(); err != nil {
-		return store.ListResponse[*ateapi.ActorAssignment]{}, fmt.Errorf("listing assignments of worker %s: %w", workerName, err)
-	}
-
-	var nextToken string
-	if len(result) > int(pageSize) {
-		result = result[:pageSize]
-		nextToken = encodePageToken(kindWorkerAssign, workerName, []string{uids[pageSize-1]})
-	}
-	return store.ListResponse[*ateapi.ActorAssignment]{Items: result, NextPageToken: nextToken}, nil
+	return listPage(ctx, p.pool, listQuery{
+		what:     "assignments of worker " + workerName,
+		item:     "actor",
+		kind:     kindWorkerAssign,
+		scope:    workerName,
+		idParts:  1,
+		keyParts: 1,
+		sql: `
+			SELECT actor_uid, proto FROM worker_assignments
+			WHERE worker_name = $1 AND ($2::text IS NULL OR actor_uid > $2)
+			ORDER BY actor_uid
+			LIMIT $3`,
+		args: []any{workerName},
+	}, opts, decodeStored[*ateapi.ActorAssignment]())
 }

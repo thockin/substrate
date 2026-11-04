@@ -113,7 +113,7 @@ func globalList(table string) string {
 
 // scopedActorList is the statement that lists one atespace's actors.
 var scopedActorList = normalizeSQL(`
-	SELECT name, proto FROM actors
+	SELECT atespace, name, proto FROM actors
 	WHERE atespace = $1 AND ($2::text IS NULL OR name > $2)
 	ORDER BY name
 	LIMIT $3`)
