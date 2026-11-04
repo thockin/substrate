@@ -92,34 +92,26 @@ func (p *Persistence) DeleteAtespace(ctx context.Context, name string, precondit
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
 
-	var protoBytes []byte
-	err = tx.QueryRow(ctx, `
-		DELETE FROM atespaces
-		WHERE name = $1
-		  AND ($2::text = '' OR uid = $2::text)
-		  AND ($3::bigint = 0 OR version = $3::bigint)
-		RETURNING proto`, name, precondition.UID, precondition.Version).Scan(&protoBytes)
+	// The foreign keys of actors, actor templates and tags restrict the
+	// delete, so it fails while the atespace holds any of them.
+	out, err := deleteRow[*ateapi.Atespace](ctx, tx, rowDelete{
+		what:         fmt.Sprintf("atespace %q", name),
+		table:        "atespaces",
+		where:        "name = $1",
+		key:          []any{name},
+		precondition: precondition,
+	})
+	if isForeignKeyViolation(err) {
+		return nil, store.ErrFailedPrecondition
+	}
 	if err != nil {
-		if isForeignKeyViolation(err) {
-			return nil, store.ErrFailedPrecondition
-		}
-		if errors.Is(err, pgx.ErrNoRows) {
-			var uid string
-			var version int64
-			err := tx.QueryRow(ctx, `SELECT uid, version FROM atespaces WHERE name = $1`, name).Scan(&uid, &version)
-			return nil, mapDeleteError(err, uid, version, precondition)
-		}
-		return nil, fmt.Errorf("deleting atespace %q: %w", name, err)
+		return nil, err
 	}
 	if err := p.policyManager.DeleteAtespacePolicies(ctx, tx, name); err != nil {
 		return nil, fmt.Errorf("deleting authorization tuples for atespace %q: %w", name, err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("committing atespace delete %q: %w", name, err)
-	}
-	out := &ateapi.Atespace{}
-	if err := unmarshalStored(protoBytes, out); err != nil {
-		return nil, fmt.Errorf("unmarshaling deleted atespace: %w", err)
 	}
 	out.Metadata.DeleteTime = timestamppb.Now()
 	return out, nil
