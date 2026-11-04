@@ -20,32 +20,17 @@ import (
 
 	"go.ate.dev/substrate/api/ateapi/v1"
 	"go.ate.dev/substrate/cmd/ateapi/internal/store"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func (p *Persistence) CreateAtespace(ctx context.Context, atespace *ateapi.Atespace) (*ateapi.Atespace, error) {
 	name := atespace.GetMetadata().GetName()
-
-	dbAtespace := proto.Clone(atespace).(*ateapi.Atespace)
-	setCreateMetadata(dbAtespace.Metadata)
-
-	protoBytes, err := proto.Marshal(dbAtespace)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling atespace: %w", err)
-	}
-
-	_, err = p.pool.Exec(ctx, `
-		INSERT INTO atespaces (name, uid, version, proto)
-		VALUES ($1, $2, $3, $4)`,
-		name, dbAtespace.GetMetadata().GetUid(), dbAtespace.GetMetadata().GetVersion(), protoBytes)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, store.ErrAlreadyExists
-		}
-		return nil, fmt.Errorf("inserting atespace %q: %w", name, err)
-	}
-	return dbAtespace, nil
+	return createRow(ctx, p.pool, rowInsert{
+		what:  fmt.Sprintf("atespace %q", name),
+		table: "atespaces",
+		cols:  "name",
+		key:   []any{name},
+	}, atespace)
 }
 
 func (p *Persistence) GetAtespace(ctx context.Context, name string) (*ateapi.Atespace, error) {

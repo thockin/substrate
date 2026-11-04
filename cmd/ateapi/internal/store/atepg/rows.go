@@ -215,3 +215,54 @@ func getRow[T resource](ctx context.Context, q querier, what, query string, args
 	}
 	return obj, nil
 }
+
+// rowInsert describes the insert of a new resource row, for createRow.
+type rowInsert struct {
+	// what names the row in errors, like "actor team-a/a".
+	what string
+	// table is the table, cols lists its key columns, like "atespace, name",
+	// and key holds their values in the same order.
+	table string
+	cols  string
+	key   []any
+}
+
+// createRow stores a copy of in as a new row and returns the copy. The copy's
+// metadata keeps in's name and atespace, and gets a new uid, version 1, and
+// create and update times of now. in is not modified.
+//
+// Returns ErrAlreadyExists if a row holds the key, or ErrFailedPrecondition if
+// a foreign key fails, which means the row's parent, such as its atespace, does
+// not exist. The foreign key also covers a parent deleted concurrently with a
+// caller's own existence check, which a separate read could not.
+func createRow[T resource](ctx context.Context, q querier, ins rowInsert, in T) (T, error) {
+	var zero T
+	obj := proto.CloneOf(in)
+	md := newMetadata(in.GetMetadata())
+	setMetadata(obj, md)
+	protoBytes, err := proto.Marshal(obj)
+	if err != nil {
+		return zero, fmt.Errorf("marshaling %s: %w", ins.what, err)
+	}
+	n := len(ins.key)
+	placeholders := ""
+	for i := range n + 3 {
+		if i > 0 {
+			placeholders += ", "
+		}
+		placeholders += fmt.Sprintf("$%d", i+1)
+	}
+	_, err = q.Exec(ctx,
+		fmt.Sprintf(`INSERT INTO %s (%s, uid, version, proto) VALUES (%s)`, ins.table, ins.cols, placeholders),
+		append(append([]any{}, ins.key...), md.GetUid(), md.GetVersion(), protoBytes)...)
+	switch {
+	case err == nil:
+		return obj, nil
+	case isUniqueViolation(err):
+		return zero, store.ErrAlreadyExists
+	case isForeignKeyViolation(err):
+		return zero, store.ErrFailedPrecondition
+	default:
+		return zero, fmt.Errorf("inserting %s: %w", ins.what, err)
+	}
+}

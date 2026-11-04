@@ -16,35 +16,20 @@ package atepg
 
 import (
 	"context"
-	"fmt"
 
 	"go.ate.dev/substrate/api/ateapi/v1"
 	"go.ate.dev/substrate/cmd/ateapi/internal/store"
 	"go.ate.dev/substrate/internal/resources"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func (p *Persistence) CreateEgressPolicy(ctx context.Context, actorRef resources.ActorRef, policy *ateapi.EgressPolicy) (*ateapi.EgressPolicy, error) {
-	dbPolicy := proto.Clone(policy).(*ateapi.EgressPolicy)
-	setCreateMetadata(dbPolicy.Metadata)
-	protoBytes, err := proto.Marshal(dbPolicy)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling egress policy: %w", err)
-	}
-	_, err = p.pool.Exec(ctx, `
-		INSERT INTO actor_egress_policies (atespace, actor_name, uid, version, proto)
-		VALUES ($1, $2, $3, $4, $5)`, actorRef.Atespace, actorRef.Name, dbPolicy.GetMetadata().GetUid(), dbPolicy.GetMetadata().GetVersion(), protoBytes)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, store.ErrAlreadyExists
-		}
-		if isForeignKeyViolation(err) {
-			return nil, store.ErrFailedPrecondition
-		}
-		return nil, fmt.Errorf("inserting egress policy for %s: %w", actorRef, err)
-	}
-	return dbPolicy, nil
+	return createRow(ctx, p.pool, rowInsert{
+		what:  "egress policy for " + actorRef.String(),
+		table: "actor_egress_policies",
+		cols:  "atespace, actor_name",
+		key:   []any{actorRef.Atespace, actorRef.Name},
+	}, policy)
 }
 
 func (p *Persistence) GetEgressPolicy(ctx context.Context, actorRef resources.ActorRef) (*ateapi.EgressPolicy, error) {
