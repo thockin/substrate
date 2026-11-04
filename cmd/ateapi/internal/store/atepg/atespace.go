@@ -16,10 +16,8 @@ package atepg
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
 	"go.ate.dev/substrate/api/ateapi/v1"
 	"go.ate.dev/substrate/cmd/ateapi/internal/store"
 	"google.golang.org/protobuf/proto"
@@ -51,19 +49,8 @@ func (p *Persistence) CreateAtespace(ctx context.Context, atespace *ateapi.Atesp
 }
 
 func (p *Persistence) GetAtespace(ctx context.Context, name string) (*ateapi.Atespace, error) {
-	var protoBytes []byte
-	err := p.pool.QueryRow(ctx, `SELECT proto FROM atespaces WHERE name = $1`, name).Scan(&protoBytes)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("getting atespace %q: %w", name, err)
-	}
-	out := &ateapi.Atespace{}
-	if err := unmarshalStored(protoBytes, out); err != nil {
-		return nil, fmt.Errorf("unmarshaling atespace: %w", err)
-	}
-	return out, nil
+	return getRow[*ateapi.Atespace](ctx, p.pool, fmt.Sprintf("atespace %q", name),
+		`SELECT uid, version, proto FROM atespaces WHERE name = $1`, name)
 }
 
 func (p *Persistence) ListAtespaces(ctx context.Context, opts store.ListOptions) (store.ListResponse[*ateapi.Atespace], error) {

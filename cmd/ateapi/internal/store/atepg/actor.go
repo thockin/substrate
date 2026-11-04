@@ -64,19 +64,8 @@ func (p *Persistence) CreateActor(ctx context.Context, actor *ateapi.Actor) (*at
 }
 
 func (p *Persistence) GetActor(ctx context.Context, actorRef resources.ActorRef) (*ateapi.Actor, error) {
-	var protoBytes []byte
-	err := p.pool.QueryRow(ctx, `SELECT proto FROM actors WHERE atespace = $1 AND name = $2`, actorRef.Atespace, actorRef.Name).Scan(&protoBytes)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("getting actor %s/%s: %w", actorRef.Atespace, actorRef.Name, err)
-	}
-	out := &ateapi.Actor{}
-	if err := unmarshalStored(protoBytes, out); err != nil {
-		return nil, fmt.Errorf("unmarshaling actor: %w", err)
-	}
-	return out, nil
+	return getRow[*ateapi.Actor](ctx, p.pool, "actor "+actorRef.String(),
+		`SELECT uid, version, proto FROM actors WHERE atespace = $1 AND name = $2`, actorRef.Atespace, actorRef.Name)
 }
 
 func (p *Persistence) UpdateActor(ctx context.Context, actorRef resources.ActorRef, precondition store.Precondition, mutate func(*ateapi.Actor) error) (*ateapi.Actor, error) {

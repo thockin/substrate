@@ -16,10 +16,8 @@ package atepg
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
 	"go.ate.dev/substrate/api/ateapi/v1"
 	"go.ate.dev/substrate/cmd/ateapi/internal/store"
 	"go.ate.dev/substrate/internal/resources"
@@ -27,21 +25,8 @@ import (
 )
 
 func (p *Persistence) GetTag(ctx context.Context, tagRef resources.TagRef) (*ateapi.Tag, error) {
-	atespace, name := tagRef.Atespace, tagRef.Name
-	var protoBytes []byte
-	if err := p.pool.QueryRow(ctx, `
-		SELECT proto FROM tags
-		WHERE atespace = $1 AND name = $2`, atespace, name).Scan(&protoBytes); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("getting tag %s/%s: %w", atespace, name, err)
-	}
-	tag := &ateapi.Tag{}
-	if err := unmarshalStored(protoBytes, tag); err != nil {
-		return nil, fmt.Errorf("unmarshaling tag: %w", err)
-	}
-	return tag, nil
+	return getRow[*ateapi.Tag](ctx, p.pool, fmt.Sprintf("tag %s/%s", tagRef.Atespace, tagRef.Name),
+		`SELECT uid, version, proto FROM tags WHERE atespace = $1 AND name = $2`, tagRef.Atespace, tagRef.Name)
 }
 
 func (p *Persistence) ListTags(ctx context.Context, atespace string, opts store.ListOptions) (store.ListResponse[*ateapi.Tag], error) {
