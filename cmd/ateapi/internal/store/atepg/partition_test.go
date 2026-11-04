@@ -45,10 +45,10 @@ func TestActorsTablePartitionable(t *testing.T) {
 	// by definition, under each partition key.
 	spansPartitions := map[string][]string{
 		// A global list walks every atespace.
-		"atespace": {globalList("actors"), globalList("actor_templates"), globalList("tags")},
+		"atespace": slices.Concat(globalList("actors"), globalList("actor_templates"), globalList("tags")),
 		// A global list walks every name, and a list within one atespace
 		// spans every name hash.
-		"name": {globalList("actors"), scopedActorList},
+		"name": slices.Concat(globalList("actors"), scopedActorList),
 	}
 
 	t.Run("by atespace", func(t *testing.T) {
@@ -102,21 +102,34 @@ func TestActorsTablePartitionable(t *testing.T) {
 	})
 }
 
-// globalList is the statement that lists table across every atespace.
-func globalList(table string) string {
-	return normalizeSQL(`
-		SELECT atespace, name, proto FROM ` + table + `
-		WHERE $1::text IS NULL OR (atespace, name) > ($1, $2)
-		ORDER BY atespace, name
-		LIMIT $3`)
+// globalList is the statements that list table across every atespace.
+func globalList(table string) []string {
+	return []string{
+		normalizeSQL(`
+			SELECT atespace, name, proto FROM ` + table + `
+			ORDER BY atespace, name
+			LIMIT $1`),
+		normalizeSQL(`
+			SELECT atespace, name, proto FROM ` + table + `
+			WHERE (atespace, name) > ($1, $2)
+			ORDER BY atespace, name
+			LIMIT $3`),
+	}
 }
 
-// scopedActorList is the statement that lists one atespace's actors.
-var scopedActorList = normalizeSQL(`
-	SELECT atespace, name, proto FROM actors
-	WHERE atespace = $1 AND ($2::text IS NULL OR name > $2)
-	ORDER BY name
-	LIMIT $3`)
+// scopedActorList is the statements that list one atespace's actors.
+var scopedActorList = []string{
+	normalizeSQL(`
+		SELECT atespace, name, proto FROM actors
+		WHERE atespace = $1
+		ORDER BY name
+		LIMIT $2`),
+	normalizeSQL(`
+		SELECT atespace, name, proto FROM actors
+		WHERE atespace = $1 AND name > $2
+		ORDER BY name
+		LIMIT $3`),
+}
 
 // runContractSuitePartitioned runs the store contract suite with tables
 // partitioned on key and fails on any statement, other than the allowed

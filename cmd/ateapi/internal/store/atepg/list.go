@@ -39,10 +39,16 @@ type listQuery struct {
 	// key must be unique within the listing, so that "after the last key"
 	// resumes exactly where the previous page stopped.
 	keyParts int
-	// sql is ordered by the key. It takes args, then keyParts nullable cursor
-	// values (all NULL for the first page), then the row limit.
-	sql  string
-	args []any
+	// firstSQL and nextSQL select the rows of the first page and of every
+	// later page, ordered by the key. firstSQL takes args and then the row
+	// limit. nextSQL takes args, then the last key of the previous page, then
+	// the row limit, and must compare the key with that cursor directly, as in
+	// "(atespace, name) > ($1, $2)". A single statement with an optional
+	// cursor, like "$1 IS NULL OR name > $1", cannot use the cursor as an index
+	// condition under a generic plan, so it would scan from the start of the
+	// range on every page.
+	firstSQL, nextSQL string
+	args              []any
 }
 
 // listPage returns the page of lq that opts addresses. decode turns a stored
@@ -60,18 +66,17 @@ func listPage[T proto.Message](ctx context.Context, q querier, lq listQuery, opt
 	if err != nil {
 		return store.ListResponse[T]{}, err
 	}
-	args := append([]any{}, lq.args...)
-	for i := range lq.keyParts {
-		var last *string
-		if len(token.Last) > 0 {
-			last = &token.Last[i]
+	sql, args := lq.firstSQL, append([]any{}, lq.args...)
+	if len(token.Last) > 0 {
+		sql = lq.nextSQL
+		for _, last := range token.Last {
+			args = append(args, last)
 		}
-		args = append(args, last)
 	}
 	// One extra row tells whether another page follows.
 	args = append(args, int64(opts.PageSize)+1)
 
-	rows, err := q.Query(ctx, lq.sql, args...)
+	rows, err := q.Query(ctx, sql, args...)
 	if err != nil {
 		return store.ListResponse[T]{}, fmt.Errorf("listing %s: %w", lq.what, err)
 	}

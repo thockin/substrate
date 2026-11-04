@@ -196,9 +196,13 @@ func (p *Persistence) ListActors(ctx context.Context, atespace string, opts stor
 		kind:     kindActor,
 		idParts:  2,
 		keyParts: 2,
-		sql: `
+		firstSQL: `
 			SELECT atespace, name, proto FROM actors
-			WHERE $1::text IS NULL OR (atespace, name) > ($1, $2)
+			ORDER BY atespace, name
+			LIMIT $1`,
+		nextSQL: `
+			SELECT atespace, name, proto FROM actors
+			WHERE (atespace, name) > ($1, $2)
 			ORDER BY atespace, name
 			LIMIT $3`,
 	}
@@ -210,9 +214,14 @@ func (p *Persistence) ListActors(ctx context.Context, atespace string, opts stor
 			scope:    atespace,
 			idParts:  2,
 			keyParts: 1,
-			sql: `
+			firstSQL: `
 				SELECT atespace, name, proto FROM actors
-				WHERE atespace = $1 AND ($2::text IS NULL OR name > $2)
+				WHERE atespace = $1
+				ORDER BY name
+				LIMIT $2`,
+			nextSQL: `
+				SELECT atespace, name, proto FROM actors
+				WHERE atespace = $1 AND name > $2
 				ORDER BY name
 				LIMIT $3`,
 			args: []any{atespace},
