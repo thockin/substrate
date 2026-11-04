@@ -78,7 +78,8 @@ func (p *Persistence) GetWorker(ctx context.Context, name string) (*ateapi.Worke
 
 // getWorkerRowForUpdate reads the worker and holds its row lock for the rest of
 // tx, so nothing else can write the row between this read and the write that
-// follows it.
+// follows it. Every write to a Worker row takes this lock first, which is what
+// serializes updates to its allocation. Returns ErrNotFound if the row is gone.
 func getWorkerRowForUpdate(ctx context.Context, tx pgx.Tx, name string) (*ateapi.Worker, error) {
 	var protoBytes []byte
 	if err := tx.QueryRow(ctx, `SELECT proto FROM workers WHERE name = $1 FOR UPDATE`, name).Scan(&protoBytes); err != nil {

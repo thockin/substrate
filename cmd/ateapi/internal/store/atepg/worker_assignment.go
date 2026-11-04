@@ -26,27 +26,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// getWorkerForUpdate reads a Worker and holds its row until the caller's
-// transaction commits, which is what serializes updates to its allocation. The
-// caller supplies the transaction; this only takes the lock.
-func getWorkerForUpdate(ctx context.Context, tx pgx.Tx, name string) (*ateapi.Worker, error) {
-	var protoBytes []byte
-	err := tx.QueryRow(ctx, `SELECT proto FROM workers WHERE name = $1 FOR UPDATE`, name).Scan(&protoBytes)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("locking worker %s: %w", name, err)
-	}
-	worker := &ateapi.Worker{}
-	if err := proto.Unmarshal(protoBytes, worker); err != nil {
-		return nil, fmt.Errorf("unmarshaling worker: %w", err)
-	}
-	return worker, nil
-}
-
 // saveWorker writes back a Worker whose allocation just moved, at the next
-// version. This assumes the caller holds the row lock getWorkerForUpdate took.
+// version. This assumes the caller holds the row lock getWorkerRowForUpdate took.
 func saveWorker(ctx context.Context, tx pgx.Tx, worker *ateapi.Worker) error {
 	read := proto.CloneOf(worker.GetMetadata())
 	setUpdateMetadata(worker.GetMetadata(), worker.GetMetadata())
@@ -54,7 +35,7 @@ func saveWorker(ctx context.Context, tx pgx.Tx, worker *ateapi.Worker) error {
 	if err != nil {
 		return fmt.Errorf("marshaling worker: %w", err)
 	}
-	// Callers hold the row lock getWorkerForUpdate took, so this matches the
+	// Callers hold the row lock getWorkerRowForUpdate took, so this matches the
 	// row they read. It is stated anyway so a caller that skipped the lock
 	// fails loudly instead of overwriting a newer Worker, and so a row that is
 	// gone is an error rather than an update of nothing.
@@ -91,7 +72,7 @@ func (p *Persistence) BindActorToWorker(ctx context.Context, workerName string, 
 
 	var updated *ateapi.Actor
 	_, err = p.writeAndAppendEvent(ctx, store.WorkerEventUpdated, func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error) {
-		worker, err := getWorkerForUpdate(ctx, tx, workerName)
+		worker, err := getWorkerRowForUpdate(ctx, tx, workerName)
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, store.ErrWorkerNotFound
 		}
@@ -168,7 +149,7 @@ func releaseActor(ctx context.Context, tx pgx.Tx, actorUID string) (*ateapi.Work
 	if err != nil {
 		return nil, err
 	}
-	worker, err := getWorkerForUpdate(ctx, tx, workerName)
+	worker, err := getWorkerRowForUpdate(ctx, tx, workerName)
 	if errors.Is(err, store.ErrNotFound) {
 		// A Worker is deleted only once it holds no assignments, so the row
 		// was released after the first read.
