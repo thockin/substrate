@@ -131,65 +131,20 @@ func (p *Persistence) MarkTagForDeletion(ctx context.Context, tagRef resources.T
 }
 
 func (p *Persistence) updateTag(ctx context.Context, tagRef resources.TagRef, precondition store.DeletePreconditions, mutate func(*ateapi.Tag) error, markForDeletion bool) (*ateapi.Tag, error) {
-	atespace, name := tagRef.Atespace, tagRef.Name
-	var currentUID string
-	var currentVersion int64
-	var currentBytes []byte
-	if err := p.pool.QueryRow(ctx, `
-			SELECT uid, version, proto FROM tags
-			WHERE atespace = $1 AND name = $2`, atespace, name).Scan(&currentUID, &currentVersion, &currentBytes); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("getting tag %s/%s for update: %w", atespace, name, err)
-	}
-
-	dbTag := &ateapi.Tag{}
-	if err := unmarshalStored(currentBytes, dbTag); err != nil {
-		return nil, fmt.Errorf("unmarshaling tag: %w", err)
-	}
-	if err := validateProtoMetadataMatchesColumns(fmt.Sprintf("tag %s/%s", atespace, name), dbTag.GetMetadata(), currentUID, currentVersion); err != nil {
-		return nil, err
-	}
-	if err := precondition.Check(dbTag.GetMetadata()); err != nil {
-		return nil, err
-	}
-	oldMeta := proto.CloneOf(dbTag.Metadata)
-	if mutate != nil {
-		if err := mutate(dbTag); err != nil {
-			return nil, err
-		}
-	}
-	// TODO: this should be done through DV and removed from here
-	if err := validateSnapshotURIs(fmt.Sprintf("tag %s/%s", atespace, name), dbTag.GetStatus().GetSnapshot()); err != nil {
-		return nil, err
-	}
-	// Stored metadata is authoritative; discard any metadata edits made by the
-	// closure and derive the next revision from the state this attempt read.
-	dbTag.Metadata = setUpdateMetadata(oldMeta)
-	if markForDeletion && dbTag.Metadata.DeleteTime == nil {
-		dbTag.Metadata.DeleteTime = proto.CloneOf(dbTag.Metadata.UpdateTime)
-	}
-
-	updatedBytes, err := proto.Marshal(dbTag)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling tag: %w", err)
-	}
-	commandTag, err := p.pool.Exec(ctx, `
-			UPDATE tags
-			SET version = $1, proto = $2
-			WHERE atespace = $3 AND name = $4 AND uid = $5 AND version = $6`,
-		dbTag.GetMetadata().GetVersion(), updatedBytes, atespace, name, currentUID, currentVersion)
-	if err != nil {
-		return nil, fmt.Errorf("updating tag %s/%s: %w", atespace, name, err)
-	}
-	if commandTag.RowsAffected() == 0 {
-		return nil, store.ErrVersionConflict
-	}
-	if commandTag.RowsAffected() != 1 {
-		return nil, fmt.Errorf("updating tag %s/%s affected %d rows, want 1", atespace, name, commandTag.RowsAffected())
-	}
-	return dbTag, nil
+	what := fmt.Sprintf("tag %s/%s", tagRef.Atespace, tagRef.Name)
+	return updateRow(ctx, p.pool, rowUpdate[*ateapi.Tag]{
+		what:         what,
+		table:        "tags",
+		where:        "atespace = $1 AND name = $2",
+		key:          []any{tagRef.Atespace, tagRef.Name},
+		precondition: precondition,
+		mutate:       mutate,
+		// TODO: this should be done through DV and removed from here
+		validate: func(mutated *ateapi.Tag) error {
+			return validateSnapshotURIs(what, mutated.GetStatus().GetSnapshot())
+		},
+		markForDeletion: markForDeletion,
+	})
 }
 
 func (p *Persistence) DeleteTag(ctx context.Context, tagRef resources.TagRef, precondition store.DeletePreconditions) (*ateapi.Tag, error) {

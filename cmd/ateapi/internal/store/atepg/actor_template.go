@@ -81,56 +81,15 @@ func (p *Persistence) MarkActorTemplateForDeletion(ctx context.Context, template
 }
 
 func (p *Persistence) updateActorTemplate(ctx context.Context, templateRef resources.ActorTemplateRef, precondition store.DeletePreconditions, mutate func(*ateapi.ActorTemplate) error, markForDeletion bool) (*ateapi.ActorTemplate, error) {
-	var currentUID string
-	var currentVersion int64
-	var currentBytes []byte
-	if err := p.pool.QueryRow(ctx, `
-			SELECT uid, version, proto FROM actor_templates
-			WHERE atespace = $1 AND name = $2`, templateRef.Atespace, templateRef.Name).Scan(&currentUID, &currentVersion, &currentBytes); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("getting actor template %s for update: %w", templateRef, err)
-	}
-
-	dbTemplate := &ateapi.ActorTemplate{}
-	if err := unmarshalStored(currentBytes, dbTemplate); err != nil {
-		return nil, fmt.Errorf("unmarshaling actor template for update: %w", err)
-	}
-	if err := validateProtoMetadataMatchesColumns("actor template "+templateRef.String(), dbTemplate.GetMetadata(), currentUID, currentVersion); err != nil {
-		return nil, err
-	}
-	if err := precondition.Check(dbTemplate.GetMetadata()); err != nil {
-		return nil, err
-	}
-	oldMeta := proto.CloneOf(dbTemplate.Metadata)
-	if mutate != nil {
-		if err := mutate(dbTemplate); err != nil {
-			return nil, err
-		}
-	}
-	dbTemplate.Metadata = setUpdateMetadata(oldMeta)
-	if markForDeletion && dbTemplate.Metadata.DeleteTime == nil {
-		dbTemplate.Metadata.DeleteTime = proto.CloneOf(dbTemplate.Metadata.UpdateTime)
-	}
-	updatedBytes, err := proto.Marshal(dbTemplate)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling actor template: %w", err)
-	}
-	commandTag, err := p.pool.Exec(ctx, `
-			UPDATE actor_templates SET version = $1, proto = $2
-			WHERE atespace = $3 AND name = $4 AND uid = $5 AND version = $6`,
-		dbTemplate.GetMetadata().GetVersion(), updatedBytes, templateRef.Atespace, templateRef.Name, currentUID, currentVersion)
-	if err != nil {
-		return nil, fmt.Errorf("updating actor template %s: %w", templateRef, err)
-	}
-	if commandTag.RowsAffected() == 0 {
-		return nil, store.ErrVersionConflict
-	}
-	if commandTag.RowsAffected() != 1 {
-		return nil, fmt.Errorf("updating actor template %s affected %d rows, want 1", templateRef, commandTag.RowsAffected())
-	}
-	return dbTemplate, nil
+	return updateRow(ctx, p.pool, rowUpdate[*ateapi.ActorTemplate]{
+		what:            "actor template " + templateRef.String(),
+		table:           "actor_templates",
+		where:           "atespace = $1 AND name = $2",
+		key:             []any{templateRef.Atespace, templateRef.Name},
+		precondition:    precondition,
+		mutate:          mutate,
+		markForDeletion: markForDeletion,
+	})
 }
 
 func (p *Persistence) ListActorTemplates(ctx context.Context, atespace string, opts store.ListOptions) (store.ListResponse[*ateapi.ActorTemplate], error) {
