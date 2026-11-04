@@ -16,10 +16,8 @@ package atepg
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
 	"go.ate.dev/substrate/api/ateapi/v1"
 	"go.ate.dev/substrate/cmd/ateapi/internal/store"
 	"go.ate.dev/substrate/internal/resources"
@@ -54,19 +52,8 @@ func (p *Persistence) CreateActorTemplate(ctx context.Context, template *ateapi.
 }
 
 func (p *Persistence) GetActorTemplate(ctx context.Context, templateRef resources.ActorTemplateRef) (*ateapi.ActorTemplate, error) {
-	var protoBytes []byte
-	err := p.pool.QueryRow(ctx, `SELECT proto FROM actor_templates WHERE atespace = $1 AND name = $2`, templateRef.Atespace, templateRef.Name).Scan(&protoBytes)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("getting actor template %s: %w", templateRef, err)
-	}
-	out := &ateapi.ActorTemplate{}
-	if err := unmarshalStored(protoBytes, out); err != nil {
-		return nil, fmt.Errorf("unmarshaling actor template: %w", err)
-	}
-	return out, nil
+	return getRow[*ateapi.ActorTemplate](ctx, p.pool, "actor template "+templateRef.String(),
+		`SELECT uid, version, proto FROM actor_templates WHERE atespace = $1 AND name = $2`, templateRef.Atespace, templateRef.Name)
 }
 
 func (p *Persistence) UpdateActorTemplate(ctx context.Context, templateRef resources.ActorTemplateRef, precondition store.Precondition, mutate func(*ateapi.ActorTemplate) error) (*ateapi.ActorTemplate, error) {

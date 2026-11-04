@@ -188,3 +188,30 @@ func deleteRow[T resource](ctx context.Context, q querier, d rowDelete) (T, erro
 	// happened.
 	return obj, nil
 }
+
+// getRow runs query, which selects the uid, version and proto columns of at
+// most one row, and returns the decoded object. It checks that the uid and
+// version columns match the proto. what names the row in errors, like "actor
+// team-a/a".
+//
+// Returns ErrNotFound if query selects no row.
+func getRow[T resource](ctx context.Context, q querier, what, query string, args ...any) (T, error) {
+	var zero T
+	var uid string
+	var version int64
+	var protoBytes []byte
+	if err := q.QueryRow(ctx, query, args...).Scan(&uid, &version, &protoBytes); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return zero, store.ErrNotFound
+		}
+		return zero, fmt.Errorf("getting %s: %w", what, err)
+	}
+	obj := zero.ProtoReflect().Type().New().Interface().(T)
+	if err := unmarshalStored(protoBytes, obj); err != nil {
+		return zero, fmt.Errorf("unmarshaling %s: %w", what, err)
+	}
+	if err := validateProtoMetadataMatchesColumns(what, obj.GetMetadata(), uid, version); err != nil {
+		return zero, err
+	}
+	return obj, nil
+}

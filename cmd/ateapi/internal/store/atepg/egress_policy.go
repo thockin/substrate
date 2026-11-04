@@ -16,10 +16,8 @@ package atepg
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
 	"go.ate.dev/substrate/api/ateapi/v1"
 	"go.ate.dev/substrate/cmd/ateapi/internal/store"
 	"go.ate.dev/substrate/internal/resources"
@@ -50,9 +48,8 @@ func (p *Persistence) CreateEgressPolicy(ctx context.Context, actorRef resources
 }
 
 func (p *Persistence) GetEgressPolicy(ctx context.Context, actorRef resources.ActorRef) (*ateapi.EgressPolicy, error) {
-	return getEgressPolicyRow(ctx, p.pool, `
-		SELECT uid, version, proto FROM actor_egress_policies
-		WHERE atespace = $1 AND actor_name = $2`, actorRef.Atespace, actorRef.Name)
+	return getRow[*ateapi.EgressPolicy](ctx, p.pool, "egress policy for "+actorRef.String(),
+		`SELECT uid, version, proto FROM actor_egress_policies WHERE atespace = $1 AND actor_name = $2`, actorRef.Atespace, actorRef.Name)
 }
 
 func (p *Persistence) UpdateEgressPolicy(ctx context.Context, actorRef resources.ActorRef, precondition store.Precondition, mutate func(*ateapi.EgressPolicy) error) (*ateapi.EgressPolicy, error) {
@@ -82,28 +79,4 @@ func (p *Persistence) DeleteEgressPolicy(ctx context.Context, actorRef resources
 	}
 	deleted.Metadata.DeleteTime = timestamppb.Now()
 	return deleted, nil
-}
-
-func getEgressPolicyRow(ctx context.Context, q querier, query string, args ...any) (*ateapi.EgressPolicy, error) {
-	var uid string
-	var version int64
-	var protoBytes []byte
-	if err := q.QueryRow(ctx, query, args...).Scan(&uid, &version, &protoBytes); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("getting egress policy: %w", err)
-	}
-	return unmarshalEgressPolicy(uid, version, protoBytes)
-}
-
-func unmarshalEgressPolicy(uid string, version int64, protoBytes []byte) (*ateapi.EgressPolicy, error) {
-	policy := &ateapi.EgressPolicy{}
-	if err := unmarshalStored(protoBytes, policy); err != nil {
-		return nil, fmt.Errorf("unmarshaling egress policy: %w", err)
-	}
-	if err := validateProtoMetadataMatchesColumns("egress policy", policy.GetMetadata(), uid, version); err != nil {
-		return nil, err
-	}
-	return policy, nil
 }

@@ -16,10 +16,8 @@ package atepg
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
 	"go.ate.dev/substrate/api/ateapi/v1"
 	"go.ate.dev/substrate/cmd/ateapi/internal/store"
 	"google.golang.org/protobuf/proto"
@@ -59,9 +57,8 @@ func (p *Persistence) CreateGlobalAccessPolicy(ctx context.Context, policy *atea
 }
 
 func (p *Persistence) GetGlobalAccessPolicy(ctx context.Context) (*ateapi.AccessPolicy, error) {
-	return getAccessPolicyRow(ctx, p.pool, `
-		SELECT uid, version, proto FROM global_access_policy
-		WHERE id = true`)
+	return getRow[*ateapi.AccessPolicy](ctx, p.pool, "global access policy",
+		`SELECT uid, version, proto FROM global_access_policy WHERE id = true`)
 }
 
 func (p *Persistence) UpdateGlobalAccessPolicy(ctx context.Context, precondition store.Precondition, mutate func(*ateapi.AccessPolicy) error) (*ateapi.AccessPolicy, error) {
@@ -132,9 +129,8 @@ func (p *Persistence) CreateAtespaceAccessPolicy(ctx context.Context, name strin
 }
 
 func (p *Persistence) GetAtespaceAccessPolicy(ctx context.Context, name string) (*ateapi.AccessPolicy, error) {
-	return getAccessPolicyRow(ctx, p.pool, `
-		SELECT uid, version, proto FROM atespace_access_policies
-		WHERE atespace_name = $1`, name)
+	return getRow[*ateapi.AccessPolicy](ctx, p.pool, "access policy for atespace "+name,
+		`SELECT uid, version, proto FROM atespace_access_policies WHERE atespace_name = $1`, name)
 }
 
 func (p *Persistence) UpdateAtespaceAccessPolicy(ctx context.Context, name string, precondition store.Precondition, mutate func(*ateapi.AccessPolicy) error) (*ateapi.AccessPolicy, error) {
@@ -195,28 +191,4 @@ func (p *Persistence) DeleteAtespaceAccessPolicy(ctx context.Context, name strin
 	}
 	deleted.Metadata.DeleteTime = timestamppb.Now()
 	return deleted, nil
-}
-
-func getAccessPolicyRow(ctx context.Context, q querier, query string, args ...any) (*ateapi.AccessPolicy, error) {
-	var uid string
-	var version int64
-	var protoBytes []byte
-	if err := q.QueryRow(ctx, query, args...).Scan(&uid, &version, &protoBytes); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("getting access policy: %w", err)
-	}
-	return unmarshalAccessPolicy(uid, version, protoBytes)
-}
-
-func unmarshalAccessPolicy(uid string, version int64, protoBytes []byte) (*ateapi.AccessPolicy, error) {
-	policy := &ateapi.AccessPolicy{}
-	if err := unmarshalStored(protoBytes, policy); err != nil {
-		return nil, fmt.Errorf("unmarshaling access policy: %w", err)
-	}
-	if err := validateProtoMetadataMatchesColumns("access policy", policy.GetMetadata(), uid, version); err != nil {
-		return nil, err
-	}
-	return policy, nil
 }

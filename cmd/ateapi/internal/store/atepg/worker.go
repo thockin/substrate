@@ -16,7 +16,6 @@ package atepg
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -57,18 +56,8 @@ func (p *Persistence) CreateWorker(ctx context.Context, worker *ateapi.Worker) (
 }
 
 func (p *Persistence) GetWorker(ctx context.Context, name string) (*ateapi.Worker, error) {
-	var protoBytes []byte
-	if err := p.pool.QueryRow(ctx, `SELECT proto FROM workers WHERE name = $1`, name).Scan(&protoBytes); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("getting worker %s: %w", name, err)
-	}
-	out := &ateapi.Worker{}
-	if err := unmarshalStored(protoBytes, out); err != nil {
-		return nil, fmt.Errorf("unmarshaling worker: %w", err)
-	}
-	return out, nil
+	return getRow[*ateapi.Worker](ctx, p.pool, "worker "+name,
+		`SELECT uid, version, proto FROM workers WHERE name = $1`, name)
 }
 
 // lockWorker reads a Worker and locks its row until tx ends. Every write to a
@@ -79,18 +68,8 @@ func (p *Persistence) GetWorker(ctx context.Context, name string) (*ateapi.Worke
 //
 // Returns ErrNotFound if the row does not exist.
 func lockWorker(ctx context.Context, tx pgx.Tx, name string) (*ateapi.Worker, error) {
-	var protoBytes []byte
-	if err := tx.QueryRow(ctx, `SELECT proto FROM workers WHERE name = $1 FOR UPDATE`, name).Scan(&protoBytes); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, store.ErrNotFound
-		}
-		return nil, fmt.Errorf("locking worker %s: %w", name, err)
-	}
-	out := &ateapi.Worker{}
-	if err := unmarshalStored(protoBytes, out); err != nil {
-		return nil, fmt.Errorf("unmarshaling worker: %w", err)
-	}
-	return out, nil
+	return getRow[*ateapi.Worker](ctx, tx, "worker "+name,
+		`SELECT uid, version, proto FROM workers WHERE name = $1 FOR UPDATE`, name)
 }
 
 // writeLockedWorker writes worker over the row keyed name, at
