@@ -349,7 +349,7 @@ func TestOutboxMaintenance_SingleMaintainer(t *testing.T) {
 }
 
 // TestWorkerEvents_OneRowPerTransaction pins the invariant the xid-only
-// watch cursor rests on: writeAndAppendEvent appends exactly one outbox row
+// watch cursor rests on: inWorkerTx appends exactly one outbox row
 // per transaction, so xids are distinct across the outbox and a poll batch
 // can never split a same-xid group.
 func TestWorkerEvents_OneRowPerTransaction(t *testing.T) {

@@ -14,7 +14,7 @@
 
 // The worker outbox: worker writes append one event row to the
 // range-partitioned, UNLOGGED worker_outbox table in the same transaction
-// (writeAndAppendEvent), per-replica watchers poll it with an xmin-fenced
+// (inWorkerTx), per-replica watchers poll it with an xmin-fenced
 // xid cursor (WatchWorkers), and a background loop pre-creates partitions
 // and retires old ones by dropping them, recording a trim high-water mark
 // that lets lagging watchers detect loss and resync (outboxMaintenance).
@@ -68,15 +68,19 @@ func unmarshalWorkerEvent(payload []byte) (store.WorkerEvent, error) {
 	return store.WorkerEvent{Type: eventType, Worker: worker}, nil
 }
 
-// writeAndAppendEvent runs fn inside a transaction, then--only if fn reports a
-// worker worth publishing--appends the event to the worker_outbox table in the
-// same transaction, so watchers see it if and only if the transaction commits.
-// fn returns the worker the event carries, or nil to skip the event; it is
-// returned from writeAndAppendEvent so callers get back what actually
-// committed. The worker comes from fn rather than from the caller because an
-// update only knows what it wrote once its mutation has run inside the
-// transaction.
-func (p *Persistence) writeAndAppendEvent(ctx context.Context, eventType store.WorkerEventType, fn func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error)) (*ateapi.Worker, error) {
+// inWorkerTx runs fn in a new transaction. If fn returns a Worker, it appends
+// one eventType event carrying that Worker to worker_outbox in the same
+// transaction, so watchers see the event if and only if the write commits.
+// Then it commits and hands the event to this process's watchers.
+//
+// fn does all of the transaction's writes. It returns the Worker as written, or
+// nil if it wrote no Worker and there is nothing to publish. inWorkerTx returns
+// that Worker. Any error from fn rolls the whole transaction back.
+//
+// Every transaction that writes a Worker must go through here, and appends
+// exactly one outbox row. The watch cursor is a bare xid, and that is only
+// gap-free if no transaction has two rows.
+func (p *Persistence) inWorkerTx(ctx context.Context, eventType store.WorkerEventType, fn func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error)) (*ateapi.Worker, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("beginning transaction: %w", err)
