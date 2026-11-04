@@ -59,40 +59,14 @@ func (p *Persistence) UpdateEgressPolicy(ctx context.Context, actorRef resources
 	if err := precondition.Validate(); err != nil {
 		return nil, err
 	}
-	dbPolicy, err := getEgressPolicyRow(ctx, p.pool, `
-		SELECT uid, version, proto FROM actor_egress_policies
-		WHERE atespace = $1 AND actor_name = $2`, actorRef.Atespace, actorRef.Name)
-	if err != nil {
-		return nil, err
-	}
-	currentUID := dbPolicy.GetMetadata().GetUid()
-	currentVersion := dbPolicy.GetMetadata().GetVersion()
-	if err := precondition.Check(dbPolicy.GetMetadata()); err != nil {
-		return nil, err
-	}
-	oldMeta := proto.CloneOf(dbPolicy.Metadata)
-	if err := mutate(dbPolicy); err != nil {
-		return nil, err
-	}
-	dbPolicy.Metadata = setUpdateMetadata(oldMeta)
-	protoBytes, err := proto.Marshal(dbPolicy)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling updated egress policy: %w", err)
-	}
-	commandTag, err := p.pool.Exec(ctx, `
-		UPDATE actor_egress_policies SET version = $1, proto = $2
-		WHERE atespace = $3 AND actor_name = $4 AND uid = $5 AND version = $6`,
-		dbPolicy.GetMetadata().GetVersion(), protoBytes, actorRef.Atespace, actorRef.Name, currentUID, currentVersion)
-	if err != nil {
-		return nil, fmt.Errorf("updating egress policy for %s: %w", actorRef, err)
-	}
-	if commandTag.RowsAffected() == 0 {
-		return nil, store.ErrVersionConflict
-	}
-	if commandTag.RowsAffected() != 1 {
-		return nil, fmt.Errorf("updating egress policy for %s affected %d rows, want 1", actorRef, commandTag.RowsAffected())
-	}
-	return dbPolicy, nil
+	return updateRow(ctx, p.pool, rowUpdate[*ateapi.EgressPolicy]{
+		what:         "egress policy for " + actorRef.String(),
+		table:        "actor_egress_policies",
+		where:        "atespace = $1 AND actor_name = $2",
+		key:          []any{actorRef.Atespace, actorRef.Name},
+		precondition: store.DeletePreconditions(precondition),
+		mutate:       mutate,
+	})
 }
 
 func (p *Persistence) DeleteEgressPolicy(ctx context.Context, actorRef resources.ActorRef, precondition store.DeletePreconditions) (*ateapi.EgressPolicy, error) {
