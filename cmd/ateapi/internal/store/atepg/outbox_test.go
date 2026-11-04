@@ -1159,3 +1159,37 @@ func TestLocalPublishSurvivesWatchClose(t *testing.T) {
 		<-done
 	}
 }
+
+// TestOutboxMaintenance_GivesUpOnABlockedLock holds a long ACCESS SHARE lock on
+// worker_outbox, as pg_dump or a slow reader does, and checks that partition
+// DDL gives up quickly instead of waiting in the lock queue, where every worker
+// write would wait behind it.
+func TestOutboxMaintenance_GivesUpOnABlockedLock(t *testing.T) {
+	s := setupPostgresPersistence(t)
+	ctx := context.Background()
+
+	reader, err := s.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin failed: %v", err)
+	}
+	defer reader.Rollback(ctx) //nolint:errcheck
+	if _, err := reader.Exec(ctx, `LOCK TABLE worker_outbox IN ACCESS SHARE MODE`); err != nil {
+		t.Fatalf("locking worker_outbox: %v", err)
+	}
+
+	// Without a lock timeout this blocks until the reader ends, so bound the
+	// test rather than hang.
+	ddlCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	future := time.Now().UTC().Add(24 * time.Hour)
+	err = s.createWorkerOutboxPartitions(ddlCtx, future)
+	if got := pgErrCode(err); got != "55P03" {
+		t.Fatalf("createWorkerOutboxPartitions under a held lock = %v (SQLSTATE %q), want lock_not_available (55P03)", err, got)
+	}
+
+	// A partition that already exists takes no lock, so maintenance of the
+	// current range still succeeds while the reader holds on.
+	if err := s.createWorkerOutboxPartitions(ddlCtx, time.Now().UTC()); err != nil {
+		t.Errorf("createWorkerOutboxPartitions for an existing partition = %v, want nil", err)
+	}
+}
