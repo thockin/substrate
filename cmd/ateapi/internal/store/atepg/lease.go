@@ -40,9 +40,9 @@ func (p *Persistence) AcquireLease(ctx context.Context, key string) (*store.Leas
 	token := uuid.NewString()
 	// Acquisition runs before any workflow step span opens, so log the
 	// query's duration to make this window attributable.
-	t := time.Now()
+	sentAt := time.Now()
 	acquired, err := p.acquireLease(ctx, key, token, ttl)
-	dAcquire := time.Since(t)
+	dAcquire := time.Since(sentAt)
 	slog.InfoContext(ctx, "PostgreSQL lease acquisition finished",
 		slog.String("key", key),
 		slog.Bool("acquired", acquired && err == nil),
@@ -59,7 +59,7 @@ func (p *Persistence) AcquireLease(ctx context.Context, key string) (*store.Leas
 	go func() {
 		defer close(renewalDone)
 		defer cancel()
-		p.renewLeaseLoop(leaseCtx, key, token, ttl)
+		p.renewLeaseLoop(leaseCtx, key, token, ttl, sentAt)
 	}()
 
 	closeFn := func() {
@@ -140,12 +140,24 @@ const (
 	renewDeadlineFraction   = 2.0 / 3.0
 )
 
-func (p *Persistence) renewLeaseLoop(ctx context.Context, key, token string, ttl time.Duration) {
+// renewLeaseLoop renews the lease every ttl/renewIntervalDivisor until ctx
+// ends or a renewal fails, and then returns. acquiredAt is when the acquiring
+// statement was sent.
+//
+// A renewal must succeed within renewDeadline of the last successful one. The
+// database sets expires_at from its clock while it runs the statement, which is
+// after the client sent it, so the row expires no earlier than ttl after the
+// send. Measuring from the send keeps the holder's deadline ahead of the row's
+// expiry no matter how slow the reply is.
+func (p *Persistence) renewLeaseLoop(ctx context.Context, key, token string, ttl time.Duration, acquiredAt time.Time) {
 	interval := ttl / renewIntervalDivisor
 	renewDeadline := time.Duration(float64(ttl) * renewDeadlineFraction)
 
-	lastRenewed := time.Now()
-	timer := time.NewTimer(interval)
+	// Each renewal is due interval after the last successful one was sent, so
+	// a slow acquire or renew does not push the next attempt past its
+	// deadline.
+	lastRenewed := acquiredAt
+	timer := time.NewTimer(time.Until(lastRenewed.Add(interval)))
 	defer timer.Stop()
 
 	for {
@@ -154,18 +166,20 @@ func (p *Persistence) renewLeaseLoop(ctx context.Context, key, token string, ttl
 			return
 		case <-timer.C:
 			renewCtx, cancel := context.WithDeadline(ctx, lastRenewed.Add(renewDeadline))
-			renewed := p.tryRenewLease(renewCtx, key, token, ttl)
+			sentAt, renewed := p.tryRenewLease(renewCtx, key, token, ttl)
 			cancel()
 			if !renewed {
 				return
 			}
-			lastRenewed = time.Now()
-			timer.Reset(interval)
+			lastRenewed = sentAt
+			timer.Reset(time.Until(lastRenewed.Add(interval)))
 		}
 	}
 }
 
-func (p *Persistence) tryRenewLease(ctx context.Context, key, token string, ttl time.Duration) bool {
+// tryRenewLease retries a renewal until one succeeds, the lease is found lost,
+// or ctx ends. On success it returns when the successful statement was sent.
+func (p *Persistence) tryRenewLease(ctx context.Context, key, token string, ttl time.Duration) (time.Time, bool) {
 	retryPeriod := ttl / renewRetryPeriodDivisor
 	retry := time.NewTimer(0)
 	defer retry.Stop()
@@ -176,18 +190,19 @@ func (p *Persistence) tryRenewLease(ctx context.Context, key, token string, ttl 
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				slog.WarnContext(ctx, "failed to renew PostgreSQL lease before its deadline", "key", key)
 			}
-			return false
+			return time.Time{}, false
 		case <-retry.C:
+			sentAt := time.Now()
 			renewed, err := p.renewLease(ctx, key, token, ttl)
 			if ctx.Err() != nil {
-				return false
+				return time.Time{}, false
 			}
 			switch {
 			case err == nil && renewed:
-				return true
+				return sentAt, true
 			case err == nil:
 				slog.WarnContext(ctx, "PostgreSQL lease renewal found lease no longer owned", "key", key)
-				return false
+				return time.Time{}, false
 			default:
 				slog.WarnContext(ctx, "failed to renew PostgreSQL lease, retrying", "key", key, "error", err)
 				retry.Reset(retryPeriod)
