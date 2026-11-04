@@ -143,8 +143,20 @@ func (p *Persistence) outboxNow(ctx context.Context) (time.Time, error) {
 	return now.UTC(), nil
 }
 
-// Database-scoped advisory lock used to elect a single replica to run the retention transaction (drops + trim).
-const outboxMaintenanceLockKey = "atepg-outbox-maintenance"
+// Advisory lock keys for outbox maintenance. Advisory locks are shared by the
+// whole database, and several installations can share one database in
+// different schemas, so lock IDs hash the key with current_schema(), as the
+// migration lock does.
+const (
+	// Elects a single replica to run each retention transaction (DEFAULT
+	// truncate, or partition drops plus trim mark).
+	outboxMaintenanceLockKey = "atepg-outbox-maintenance"
+	// Serializes partition creation across replicas.
+	outboxPartitionsLockKey = "agent-substrate-atepg-outbox-partitions"
+)
+
+// outboxLockIDSQL computes the advisory lock ID for the key in $1.
+const outboxLockIDSQL = `hashtextextended($1 || ':' || current_schema(), 0)`
 
 // outboxDDLLockTimeout bounds how long a maintenance statement waits for a
 // table lock. Creating, dropping, or truncating a partition needs ACCESS
@@ -213,7 +225,7 @@ func (p *Persistence) retireStrayedOutboxDefault(ctx context.Context) error {
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
 
 	var elected bool
-	if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtext(current_database() || ':' || $1))`, outboxMaintenanceLockKey).Scan(&elected); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(`+outboxLockIDSQL+`)`, outboxMaintenanceLockKey).Scan(&elected); err != nil {
 		return fmt.Errorf("electing outbox maintenance: %w", err)
 	}
 	if !elected {
@@ -258,7 +270,7 @@ func (p *Persistence) dropExpiredOutboxRetention(ctx context.Context, now time.T
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
 
 	var elected bool
-	if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtext(current_database() || ':' || $1))`, outboxMaintenanceLockKey).Scan(&elected); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(`+outboxLockIDSQL+`)`, outboxMaintenanceLockKey).Scan(&elected); err != nil {
 		return fmt.Errorf("electing outbox maintenance: %w", err)
 	}
 	if !elected {
@@ -318,7 +330,7 @@ func (p *Persistence) tryCreateWorkerOutboxPartitions(ctx context.Context, trunc
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
 
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('agent-substrate-atepg-outbox-partitions'))`); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(`+outboxLockIDSQL+`)`, outboxPartitionsLockKey); err != nil {
 		return fmt.Errorf("locking outbox partition DDL: %w", err)
 	}
 	if err := boundOutboxDDLLockWaits(ctx, tx); err != nil {

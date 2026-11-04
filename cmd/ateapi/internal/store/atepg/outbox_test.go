@@ -319,7 +319,7 @@ func TestOutboxMaintenance_SingleMaintainer(t *testing.T) {
 		t.Fatalf("Begin holder failed: %v", err)
 	}
 	defer holder.Rollback(ctx) //nolint:errcheck // released below
-	if _, err := holder.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext(current_database() || ':' || $1))`, outboxMaintenanceLockKey); err != nil {
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_xact_lock(`+outboxLockIDSQL+`)`, outboxMaintenanceLockKey); err != nil {
 		t.Fatalf("taking maintenance lock failed: %v", err)
 	}
 
