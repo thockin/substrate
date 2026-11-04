@@ -44,7 +44,7 @@ const (
 type pageToken struct {
 	Version int          `json:"v"`
 	Kind    resourceKind `json:"kind"`
-	Scope   string       `json:"scope"` // atespace name for scoped actor listing; empty otherwise.
+	Scope   string       `json:"scope"` // the atespace or Worker a listing is limited to; empty otherwise.
 	Last    []string     `json:"last"`  // last row's ordering-column values, in order.
 }
 

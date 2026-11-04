@@ -67,55 +67,18 @@ func (p *Persistence) GetAtespace(ctx context.Context, name string) (*ateapi.Ate
 }
 
 func (p *Persistence) ListAtespaces(ctx context.Context, opts store.ListOptions) (store.ListResponse[*ateapi.Atespace], error) {
-	opts, err := store.NormalizeListOptions(opts)
-	if err != nil {
-		return store.ListResponse[*ateapi.Atespace]{}, err
-	}
-	pageSize, pageTokenStr := opts.PageSize, opts.PageToken
-	token, err := decodePageToken(pageTokenStr, kindAtespace, "", 1)
-	if err != nil {
-		return store.ListResponse[*ateapi.Atespace]{}, err
-	}
-	var last *string
-	if len(token.Last) > 0 {
-		last = &token.Last[0]
-	}
-
-	rows, err := p.pool.Query(ctx, `
-		SELECT name, proto FROM atespaces
-		WHERE $1::text IS NULL OR name > $1
-		ORDER BY name
-		LIMIT $2`, last, int64(pageSize)+1)
-	if err != nil {
-		return store.ListResponse[*ateapi.Atespace]{}, fmt.Errorf("listing atespaces: %w", err)
-	}
-	defer rows.Close()
-
-	var names []string
-	var result []*ateapi.Atespace
-	for rows.Next() {
-		var name string
-		var protoBytes []byte
-		if err := rows.Scan(&name, &protoBytes); err != nil {
-			return store.ListResponse[*ateapi.Atespace]{}, fmt.Errorf("scanning atespace row: %w", err)
-		}
-		a := &ateapi.Atespace{}
-		if err := unmarshalRow(protoBytes, a, "atespace", name); err != nil {
-			return store.ListResponse[*ateapi.Atespace]{}, err
-		}
-		result = append(result, a)
-		names = append(names, name)
-	}
-	if err := rows.Err(); err != nil {
-		return store.ListResponse[*ateapi.Atespace]{}, fmt.Errorf("listing atespaces: %w", err)
-	}
-
-	var nextToken string
-	if len(result) > int(pageSize) {
-		result = result[:pageSize]
-		nextToken = encodePageToken(kindAtespace, "", []string{names[pageSize-1]})
-	}
-	return store.ListResponse[*ateapi.Atespace]{Items: result, NextPageToken: nextToken}, nil
+	return listPage(ctx, p.pool, listQuery{
+		what:     "atespaces",
+		item:     "atespace",
+		kind:     kindAtespace,
+		idParts:  1,
+		keyParts: 1,
+		sql: `
+			SELECT name, proto FROM atespaces
+			WHERE $1::text IS NULL OR name > $1
+			ORDER BY name
+			LIMIT $2`,
+	}, opts, decodeStored[*ateapi.Atespace]())
 }
 
 func (p *Persistence) DeleteAtespace(ctx context.Context, name string, precondition store.DeletePreconditions) (*ateapi.Atespace, error) {

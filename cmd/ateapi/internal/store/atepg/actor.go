@@ -190,115 +190,33 @@ func (p *Persistence) DeleteActor(ctx context.Context, actorRef resources.ActorR
 }
 
 func (p *Persistence) ListActors(ctx context.Context, atespace string, opts store.ListOptions) (store.ListResponse[*ateapi.Actor], error) {
-	opts, err := store.NormalizeListOptions(opts)
-	if err != nil {
-		return store.ListResponse[*ateapi.Actor]{}, err
+	lq := listQuery{
+		what:     "actors",
+		item:     "actor",
+		kind:     kindActor,
+		idParts:  2,
+		keyParts: 2,
+		sql: `
+			SELECT atespace, name, proto FROM actors
+			WHERE $1::text IS NULL OR (atespace, name) > ($1, $2)
+			ORDER BY atespace, name
+			LIMIT $3`,
 	}
-	var items []*ateapi.Actor
-	var nextToken string
 	if atespace != "" {
-		items, nextToken, err = p.listActorsScoped(ctx, atespace, opts.PageSize, opts.PageToken)
-	} else {
-		items, nextToken, err = p.listActorsGlobal(ctx, opts.PageSize, opts.PageToken)
-	}
-	if err != nil {
-		return store.ListResponse[*ateapi.Actor]{}, err
-	}
-	return store.ListResponse[*ateapi.Actor]{Items: items, NextPageToken: nextToken}, nil
-}
-
-func (p *Persistence) listActorsScoped(ctx context.Context, atespace string, pageSize int32, pageTokenStr string) ([]*ateapi.Actor, string, error) {
-	token, err := decodePageToken(pageTokenStr, kindActor, atespace, 1)
-	if err != nil {
-		return nil, "", err
-	}
-	var last *string
-	if len(token.Last) > 0 {
-		last = &token.Last[0]
-	}
-
-	rows, err := p.pool.Query(ctx, `
-		SELECT name, proto FROM actors
-		WHERE atespace = $1 AND ($2::text IS NULL OR name > $2)
-		ORDER BY name
-		LIMIT $3`, atespace, last, int64(pageSize)+1)
-	if err != nil {
-		return nil, "", fmt.Errorf("listing actors in %q: %w", atespace, err)
-	}
-	defer rows.Close()
-
-	var names []string
-	var result []*ateapi.Actor
-	for rows.Next() {
-		var name string
-		var protoBytes []byte
-		if err := rows.Scan(&name, &protoBytes); err != nil {
-			return nil, "", fmt.Errorf("scanning actor row: %w", err)
+		lq = listQuery{
+			what:     fmt.Sprintf("actors in %q", atespace),
+			item:     "actor",
+			kind:     kindActor,
+			scope:    atespace,
+			idParts:  2,
+			keyParts: 1,
+			sql: `
+				SELECT atespace, name, proto FROM actors
+				WHERE atespace = $1 AND ($2::text IS NULL OR name > $2)
+				ORDER BY name
+				LIMIT $3`,
+			args: []any{atespace},
 		}
-		a := &ateapi.Actor{}
-		if err := unmarshalRow(protoBytes, a, "actor", atespace, name); err != nil {
-			return nil, "", err
-		}
-		result = append(result, a)
-		names = append(names, name)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, "", fmt.Errorf("listing actors in %q: %w", atespace, err)
-	}
-
-	var nextToken string
-	if len(result) > int(pageSize) {
-		result = result[:pageSize]
-		nextToken = encodePageToken(kindActor, atespace, []string{names[pageSize-1]})
-	}
-	return result, nextToken, nil
-}
-
-func (p *Persistence) listActorsGlobal(ctx context.Context, pageSize int32, pageTokenStr string) ([]*ateapi.Actor, string, error) {
-	token, err := decodePageToken(pageTokenStr, kindActor, "", 2)
-	if err != nil {
-		return nil, "", err
-	}
-	var lastAtespace, lastName *string
-	if len(token.Last) == 2 {
-		lastAtespace, lastName = &token.Last[0], &token.Last[1]
-	}
-
-	rows, err := p.pool.Query(ctx, `
-		SELECT atespace, name, proto FROM actors
-		WHERE $1::text IS NULL OR (atespace, name) > ($1, $2)
-		ORDER BY atespace, name
-		LIMIT $3`, lastAtespace, lastName, int64(pageSize)+1)
-	if err != nil {
-		return nil, "", fmt.Errorf("listing actors: %w", err)
-	}
-	defer rows.Close()
-
-	type key struct{ atespace, name string }
-	var keys []key
-	var result []*ateapi.Actor
-	for rows.Next() {
-		var k key
-		var protoBytes []byte
-		if err := rows.Scan(&k.atespace, &k.name, &protoBytes); err != nil {
-			return nil, "", fmt.Errorf("scanning actor row: %w", err)
-		}
-		a := &ateapi.Actor{}
-		if err := unmarshalRow(protoBytes, a, "actor", k.atespace, k.name); err != nil {
-			return nil, "", err
-		}
-		result = append(result, a)
-		keys = append(keys, k)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", fmt.Errorf("listing actors: %w", err)
-	}
-
-	var nextToken string
-	if len(result) > int(pageSize) {
-		result = result[:pageSize]
-		last := keys[pageSize-1]
-		nextToken = encodePageToken(kindActor, "", []string{last.atespace, last.name})
-	}
-	return result, nextToken, nil
+	return listPage(ctx, p.pool, lq, opts, decodeStored[*ateapi.Actor]())
 }

@@ -147,75 +147,35 @@ func (p *Persistence) updateActorTemplate(ctx context.Context, templateRef resou
 }
 
 func (p *Persistence) ListActorTemplates(ctx context.Context, atespace string, opts store.ListOptions) (store.ListResponse[*ateapi.ActorTemplate], error) {
-	opts, err := store.NormalizeListOptions(opts)
-	if err != nil {
-		return store.ListResponse[*ateapi.ActorTemplate]{}, err
-	}
-	pageSize, pageTokenStr := opts.PageSize, opts.PageToken
-	keyParts := 2
-	if atespace != "" {
-		keyParts = 1
-	}
-	token, err := decodePageToken(pageTokenStr, kindActorTemplate, atespace, keyParts)
-	if err != nil {
-		return store.ListResponse[*ateapi.ActorTemplate]{}, err
-	}
-
-	var rows pgx.Rows
-	if atespace != "" {
-		var last *string
-		if len(token.Last) == 1 {
-			last = &token.Last[0]
-		}
-		rows, err = p.pool.Query(ctx, `
-			SELECT atespace, name, proto FROM actor_templates
-			WHERE atespace = $1 AND ($2::text IS NULL OR name > $2)
-			ORDER BY name LIMIT $3`, atespace, last, int64(pageSize)+1)
-	} else {
-		var lastAtespace, lastName *string
-		if len(token.Last) == 2 {
-			lastAtespace, lastName = &token.Last[0], &token.Last[1]
-		}
-		rows, err = p.pool.Query(ctx, `
+	lq := listQuery{
+		what:     "actor templates",
+		item:     "actor template",
+		kind:     kindActorTemplate,
+		idParts:  2,
+		keyParts: 2,
+		sql: `
 			SELECT atespace, name, proto FROM actor_templates
 			WHERE $1::text IS NULL OR (atespace, name) > ($1, $2)
-			ORDER BY atespace, name LIMIT $3`, lastAtespace, lastName, int64(pageSize)+1)
+			ORDER BY atespace, name
+			LIMIT $3`,
 	}
-	if err != nil {
-		return store.ListResponse[*ateapi.ActorTemplate]{}, fmt.Errorf("listing actor templates: %w", err)
-	}
-	defer rows.Close()
-
-	type key struct{ atespace, name string }
-	var keys []key
-	var result []*ateapi.ActorTemplate
-	for rows.Next() {
-		var k key
-		var protoBytes []byte
-		if err := rows.Scan(&k.atespace, &k.name, &protoBytes); err != nil {
-			return store.ListResponse[*ateapi.ActorTemplate]{}, fmt.Errorf("scanning actor template row: %w", err)
+	if atespace != "" {
+		lq = listQuery{
+			what:     fmt.Sprintf("actor templates in %q", atespace),
+			item:     "actor template",
+			kind:     kindActorTemplate,
+			scope:    atespace,
+			idParts:  2,
+			keyParts: 1,
+			sql: `
+				SELECT atespace, name, proto FROM actor_templates
+				WHERE atespace = $1 AND ($2::text IS NULL OR name > $2)
+				ORDER BY name
+				LIMIT $3`,
+			args: []any{atespace},
 		}
-		template := &ateapi.ActorTemplate{}
-		if err := unmarshalRow(protoBytes, template, "actor template", k.atespace, k.name); err != nil {
-			return store.ListResponse[*ateapi.ActorTemplate]{}, err
-		}
-		keys = append(keys, k)
-		result = append(result, template)
 	}
-	if err := rows.Err(); err != nil {
-		return store.ListResponse[*ateapi.ActorTemplate]{}, fmt.Errorf("listing actor templates: %w", err)
-	}
-	var nextToken string
-	if len(result) > int(pageSize) {
-		result = result[:pageSize]
-		last := keys[pageSize-1]
-		lastParts := []string{last.atespace, last.name}
-		if atespace != "" {
-			lastParts = []string{last.name}
-		}
-		nextToken = encodePageToken(kindActorTemplate, atespace, lastParts)
-	}
-	return store.ListResponse[*ateapi.ActorTemplate]{Items: result, NextPageToken: nextToken}, nil
+	return listPage(ctx, p.pool, lq, opts, decodeStored[*ateapi.ActorTemplate]())
 }
 
 func (p *Persistence) DeleteActorTemplate(ctx context.Context, templateRef resources.ActorTemplateRef, precondition store.DeletePreconditions) (*ateapi.ActorTemplate, error) {

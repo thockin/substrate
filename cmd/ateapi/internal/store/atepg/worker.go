@@ -189,53 +189,16 @@ func (p *Persistence) DeleteWorker(ctx context.Context, name string, preconditio
 }
 
 func (p *Persistence) ListWorkers(ctx context.Context, opts store.ListOptions) (store.ListResponse[*ateapi.Worker], error) {
-	opts, err := store.NormalizeListOptions(opts)
-	if err != nil {
-		return store.ListResponse[*ateapi.Worker]{}, err
-	}
-	pageSize, pageTokenStr := opts.PageSize, opts.PageToken
-	token, err := decodePageToken(pageTokenStr, kindWorker, "", 1)
-	if err != nil {
-		return store.ListResponse[*ateapi.Worker]{}, err
-	}
-	var last *string
-	if len(token.Last) > 0 {
-		last = &token.Last[0]
-	}
-
-	rows, err := p.pool.Query(ctx, `
-		SELECT name, proto FROM workers
-		WHERE $1::text IS NULL OR name > $1
-		ORDER BY name
-		LIMIT $2`, last, int64(pageSize)+1)
-	if err != nil {
-		return store.ListResponse[*ateapi.Worker]{}, fmt.Errorf("listing workers: %w", err)
-	}
-	defer rows.Close()
-
-	var names []string
-	var result []*ateapi.Worker
-	for rows.Next() {
-		var name string
-		var protoBytes []byte
-		if err := rows.Scan(&name, &protoBytes); err != nil {
-			return store.ListResponse[*ateapi.Worker]{}, fmt.Errorf("scanning worker row: %w", err)
-		}
-		w := &ateapi.Worker{}
-		if err := unmarshalRow(protoBytes, w, "worker", name); err != nil {
-			return store.ListResponse[*ateapi.Worker]{}, err
-		}
-		result = append(result, w)
-		names = append(names, name)
-	}
-	if err := rows.Err(); err != nil {
-		return store.ListResponse[*ateapi.Worker]{}, fmt.Errorf("listing workers: %w", err)
-	}
-
-	var nextToken string
-	if len(result) > int(pageSize) {
-		result = result[:pageSize]
-		nextToken = encodePageToken(kindWorker, "", []string{names[pageSize-1]})
-	}
-	return store.ListResponse[*ateapi.Worker]{Items: result, NextPageToken: nextToken}, nil
+	return listPage(ctx, p.pool, listQuery{
+		what:     "workers",
+		item:     "worker",
+		kind:     kindWorker,
+		idParts:  1,
+		keyParts: 1,
+		sql: `
+			SELECT name, proto FROM workers
+			WHERE $1::text IS NULL OR name > $1
+			ORDER BY name
+			LIMIT $2`,
+	}, opts, decodeStored[*ateapi.Worker]())
 }
