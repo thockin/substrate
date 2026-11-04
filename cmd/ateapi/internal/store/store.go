@@ -32,9 +32,9 @@ var (
 	// ErrAlreadyExists indicates that the object already exists in the DB.
 	ErrAlreadyExists = errors.New("persistence: already exists")
 
-	// ErrVersionConflict indicates a write lost to a concurrent one: either the
-	// write was guarded on a version the stored object is no longer at, or the
-	// store's own retry budget was exhausted losing the same race.
+	// ErrVersionConflict indicates a write lost to a concurrent one: the write
+	// was guarded on a version the stored object is no longer at, or another
+	// write moved the object between the store's read and its write.
 	ErrVersionConflict = errors.New("persistence: version conflict")
 
 	// ErrFailedPrecondition indicates the object is not in the required state for the operation.
@@ -92,15 +92,14 @@ type Interface interface {
 	// version guards are required.
 	//
 	// mutate receives the stored actor and edits it in place. The mutated actor is
-	// written iff mutate returns nil.
-	//
-	// mutate may run more than once, because the store retries when a concurrent
-	// write invalidates the transaction.
+	// written iff mutate returns nil. mutate runs at most once per call: the
+	// store does not retry, because a retry could never pass the version guard.
 	//
 	// Returns ErrPreconditionRequired if the precondition omits either guard,
 	// ErrNotFound if missing, ErrUIDConflict or ErrVersionConflict if the
-	// precondition no longer holds, ErrVersionConflict if the retry budget is
-	// exhausted, or the mutate's error verbatim otherwise. Immutable fields
+	// precondition no longer holds, ErrVersionConflict if a concurrent write
+	// lands between the read and the write, or the mutate's error verbatim
+	// otherwise. Immutable fields
 	// are not checked here; the service layer enforces them via declarative
 	// validation before the write.
 	UpdateActor(ctx context.Context, actorRef resources.ActorRef, precondition Precondition, mutate func(toUpdate *ateapi.Actor) error) (*ateapi.Actor, error)
@@ -153,15 +152,12 @@ type Interface interface {
 	// guards are required.
 	//
 	// mutate receives the stored tag and edits it in place. The mutated tag is
-	// written iff mutate returns nil.
-	//
-	// mutate may run more than once, because the store retries when a concurrent
-	// write invalidates the transaction.
+	// written iff mutate returns nil. mutate runs at most once per call.
 	//
 	// Returns ErrPreconditionRequired if the precondition omits either guard,
 	// ErrNotFound if missing, ErrUIDConflict or ErrVersionConflict if the
-	// precondition no longer holds, ErrVersionConflict if the retry budget is
-	// exhausted, ErrImmutableField if the mutated tag changed a field that is
+	// precondition no longer holds, ErrVersionConflict if a concurrent write
+	// lands between the read and the write, ErrImmutableField if the mutated tag changed a field that is
 	// immutable for its lifetime, or the mutate's error verbatim otherwise.
 	//
 	// status.snapshot is immutable once set
@@ -267,10 +263,12 @@ type Interface interface {
 	// checked against the stored worker before mutate runs. Both the uid and
 	// version guards are required.
 	//
+	// mutate runs at most once per call, against the worker as stored, with its
+	// row locked until the write commits.
+	//
 	// Returns ErrPreconditionRequired if the precondition omits either guard,
 	// ErrNotFound if missing, ErrUIDConflict or ErrVersionConflict if the
-	// precondition no longer holds, ErrVersionConflict if the retry budget is
-	// exhausted, or the mutate's error verbatim otherwise.
+	// precondition no longer holds, or the mutate's error verbatim otherwise.
 	UpdateWorker(ctx context.Context, name string, precondition Precondition, mutate func(toUpdate *ateapi.Worker) error) (*ateapi.Worker, error)
 
 	// MarkWorkerForDeletion initiates the deletion of a worker. It sets
