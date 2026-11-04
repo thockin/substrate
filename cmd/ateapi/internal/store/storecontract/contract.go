@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -2154,15 +2155,17 @@ func runWorkerContractTests(t *testing.T, setup func(t *testing.T) store.Interfa
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				// Claimants contend over the allocation total, which is what a
-				// claim actually moves on the Worker record now that the
-				// assignments themselves are separate records. The cpu limit carries
-				// the claimant's number so the winner is identifiable.
+				// Claimants contend over a label carrying the claimant's number,
+				// so the winner is identifiable. Allocation is not used, because
+				// it has to stay the sum of the Worker's assignments.
 				_, err := s.UpdateWorker(ctx, testWorkerName, store.PreconditionFrom(created), func(toUpdate *ateapi.Worker) error {
-					if toUpdate.GetStatus().GetAllocated().GetActors() > 0 {
+					if toUpdate.GetLabels()["claimed-by"] != "" {
 						return errTaken
 					}
-					toUpdate.Status.Allocated = &ateapi.WorkerResources{Actors: 1, CpuMillicores: int64(i) + 1, MemoryBytes: 0}
+					if toUpdate.Labels == nil {
+						toUpdate.Labels = map[string]string{}
+					}
+					toUpdate.Labels["claimed-by"] = strconv.Itoa(i + 1)
 					return nil
 				})
 				switch {
@@ -2190,8 +2193,8 @@ func runWorkerContractTests(t *testing.T, setup func(t *testing.T) store.Interfa
 		if err != nil {
 			t.Fatalf("GetWorker failed: %v", err)
 		}
-		if n := got.GetStatus().GetAllocated().GetActors(); n < 1 || n > int32(claimants) {
-			t.Errorf("stored claim names %d, want one of the claimants", n)
+		if n, err := strconv.Atoi(got.GetLabels()["claimed-by"]); err != nil || n < 1 || n > claimants {
+			t.Errorf("stored claim names %q, want one of the claimants", got.GetLabels()["claimed-by"])
 		}
 		// One winning write on top of the create, and no partial ones.
 		if got.GetMetadata().GetVersion() != 2 {

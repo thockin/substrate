@@ -480,6 +480,7 @@ func TestClose_StopsMaintenance(t *testing.T) {
 // cannot see this; the plan can.
 func TestPollQueryPlanStaysOnIndex(t *testing.T) {
 	s := setupPostgresPersistence(t)
+	waiveInvariants(s) // seeds many outbox rows in one transaction
 	ctx := context.Background()
 
 	// Seed enough rows (and stats) for the planner to have a real choice:
