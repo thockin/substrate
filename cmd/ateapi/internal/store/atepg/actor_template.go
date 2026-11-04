@@ -134,25 +134,11 @@ func (p *Persistence) ListActorTemplates(ctx context.Context, atespace string, o
 }
 
 func (p *Persistence) DeleteActorTemplate(ctx context.Context, templateRef resources.ActorTemplateRef, precondition store.DeletePreconditions) (*ateapi.ActorTemplate, error) {
-	var protoBytes []byte
-	err := p.pool.QueryRow(ctx, `
-		DELETE FROM actor_templates AS t
-		WHERE t.atespace = $1 AND t.name = $2
-		  AND ($3::text = '' OR t.uid = $3::text)
-		  AND ($4::bigint = 0 OR t.version = $4::bigint)
-		RETURNING t.proto`, templateRef.Atespace, templateRef.Name, precondition.UID, precondition.Version).Scan(&protoBytes)
-	if errors.Is(err, pgx.ErrNoRows) {
-		var uid string
-		var version int64
-		err := p.pool.QueryRow(ctx, `SELECT uid, version FROM actor_templates WHERE atespace = $1 AND name = $2`, templateRef.Atespace, templateRef.Name).Scan(&uid, &version)
-		return nil, mapDeleteError(err, uid, version, precondition)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("deleting actor template %s: %w", templateRef, err)
-	}
-	out := &ateapi.ActorTemplate{}
-	if err := unmarshalStored(protoBytes, out); err != nil {
-		return nil, fmt.Errorf("unmarshaling deleted actor template: %w", err)
-	}
-	return out, nil
+	return deleteRow[*ateapi.ActorTemplate](ctx, p.pool, rowDelete{
+		what:         "actor template " + templateRef.String(),
+		table:        "actor_templates",
+		where:        "atespace = $1 AND name = $2",
+		key:          []any{templateRef.Atespace, templateRef.Name},
+		precondition: precondition,
+	})
 }

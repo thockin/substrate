@@ -148,26 +148,11 @@ func (p *Persistence) updateTag(ctx context.Context, tagRef resources.TagRef, pr
 }
 
 func (p *Persistence) DeleteTag(ctx context.Context, tagRef resources.TagRef, precondition store.DeletePreconditions) (*ateapi.Tag, error) {
-	atespace, name := tagRef.Atespace, tagRef.Name
-	var protoBytes []byte
-	err := p.pool.QueryRow(ctx, `
-		DELETE FROM tags
-		WHERE atespace = $1 AND name = $2
-		  AND ($3::text = '' OR uid = $3::text)
-		  AND ($4::bigint = 0 OR version = $4::bigint)
-		RETURNING proto`, atespace, name, precondition.UID, precondition.Version).Scan(&protoBytes)
-	if errors.Is(err, pgx.ErrNoRows) {
-		var uid string
-		var version int64
-		err := p.pool.QueryRow(ctx, `SELECT uid, version FROM tags WHERE atespace = $1 AND name = $2`, atespace, name).Scan(&uid, &version)
-		return nil, mapDeleteError(err, uid, version, precondition)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("deleting tag %s/%s: %w", atespace, name, err)
-	}
-	tag := &ateapi.Tag{}
-	if err := unmarshalStored(protoBytes, tag); err != nil {
-		return nil, fmt.Errorf("unmarshaling deleted tag: %w", err)
-	}
-	return tag, nil
+	return deleteRow[*ateapi.Tag](ctx, p.pool, rowDelete{
+		what:         fmt.Sprintf("tag %s/%s", tagRef.Atespace, tagRef.Name),
+		table:        "tags",
+		where:        "atespace = $1 AND name = $2",
+		key:          []any{tagRef.Atespace, tagRef.Name},
+		precondition: precondition,
+	})
 }

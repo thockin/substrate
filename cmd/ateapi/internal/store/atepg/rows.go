@@ -129,3 +129,62 @@ func setMetadata(m resource, md *ateapi.ResourceMetadata) {
 	r := m.ProtoReflect()
 	r.Set(r.Descriptor().Fields().ByName("metadata"), protoreflect.ValueOfMessage(md.ProtoReflect()))
 }
+
+// rowDelete describes a guarded delete of one resource row, for deleteRow.
+type rowDelete struct {
+	// what names the row in errors, like "tag team-a/v1".
+	what string
+	// table is the table, and where selects the row by its key, with the key
+	// values in key as $1, $2, and so on.
+	table string
+	where string
+	key   []any
+	// precondition is checked against the row in the same statement that
+	// deletes it. Its zero value deletes whatever row holds the key.
+	precondition store.DeletePreconditions
+}
+
+// deleteRow deletes the row d addresses if it passes d.precondition, and
+// returns the object as it was stored.
+//
+// The check and the delete are one statement, so they see the same row. If
+// nothing was deleted, a second read finds out why: ErrNotFound if there is no
+// row, the precondition's error if the row fails it, or ErrVersionConflict if
+// the row passes it now, which means the row changed between the statements.
+// An error from the DELETE itself, such as a foreign key violation, is
+// returned wrapped, so callers can still match it.
+func deleteRow[T resource](ctx context.Context, q querier, d rowDelete) (T, error) {
+	var zero T
+	n := len(d.key)
+	var protoBytes []byte
+	err := q.QueryRow(ctx,
+		fmt.Sprintf(`DELETE FROM %s WHERE %s AND ($%d::text = '' OR uid = $%d::text) AND ($%d::bigint = 0 OR version = $%d::bigint) RETURNING proto`,
+			d.table, d.where, n+1, n+1, n+2, n+2),
+		append(append([]any{}, d.key...), d.precondition.UID, d.precondition.Version)...).Scan(&protoBytes)
+	if errors.Is(err, pgx.ErrNoRows) {
+		var uid string
+		var version int64
+		err := q.QueryRow(ctx, `SELECT uid, version FROM `+d.table+` WHERE `+d.where, d.key...).Scan(&uid, &version)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return zero, store.ErrNotFound
+		}
+		if err != nil {
+			return zero, fmt.Errorf("reading %s after a guarded delete matched nothing: %w", d.what, err)
+		}
+		if err := d.precondition.Check(&ateapi.ResourceMetadata{Uid: uid, Version: version}); err != nil {
+			return zero, err
+		}
+		return zero, store.ErrVersionConflict
+	}
+	if err != nil {
+		return zero, fmt.Errorf("deleting %s: %w", d.what, err)
+	}
+	obj := zero.ProtoReflect().Type().New().Interface().(T)
+	if err := unmarshalStored(protoBytes, obj); err != nil {
+		return zero, fmt.Errorf("unmarshaling deleted %s: %w", d.what, err)
+	}
+	// The row is already gone, so the uid and version columns are not checked
+	// against the proto: failing now would report an error for a delete that
+	// happened.
+	return obj, nil
+}
