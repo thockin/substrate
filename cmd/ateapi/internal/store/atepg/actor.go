@@ -23,44 +23,22 @@ import (
 	"go.ate.dev/substrate/api/ateapi/v1"
 	"go.ate.dev/substrate/cmd/ateapi/internal/store"
 	"go.ate.dev/substrate/internal/resources"
-	"google.golang.org/protobuf/proto"
 )
 
 func (p *Persistence) CreateActor(ctx context.Context, actor *ateapi.Actor) (*ateapi.Actor, error) {
-	atespace := actor.GetMetadata().GetAtespace()
-	name := actor.GetMetadata().GetName()
-
-	// TODO: doing a full clone here is wasteful - the caller already has to
-	// make modifications to the actor before passing it in, so we can safely
-	// mutate it in place.  This breaks some of the contract tests, so we can
-	// fix it later.
-	dbActor := proto.Clone(actor).(*ateapi.Actor)
-	setCreateMetadata(dbActor.Metadata)
-	if err := validateSnapshotURIs("actor "+resources.ActorRefFromActor(dbActor).String(), dbActor.GetStatus().GetSnapshots()...); err != nil {
+	ref := resources.ActorRefFromActor(actor)
+	if err := validateSnapshotURIs("actor "+ref.String(), actor.GetStatus().GetSnapshots()...); err != nil {
 		return nil, err
 	}
-
-	protoBytes, err := proto.Marshal(dbActor)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling actor: %w", err)
-	}
-
-	_, err = p.pool.Exec(ctx, `
-		INSERT INTO actors (atespace, name, uid, version, proto)
-		VALUES ($1, $2, $3, $4, $5)`,
-		atespace, name, dbActor.GetMetadata().GetUid(), dbActor.GetMetadata().GetVersion(), protoBytes)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, store.ErrAlreadyExists
-		}
-		if isForeignKeyViolation(err) {
-			// The atespace referenced by this actor doesn't exist (or was
-			// deleted concurrently with the control API's own pre-check).
-			return nil, store.ErrFailedPrecondition
-		}
-		return nil, fmt.Errorf("inserting actor %s/%s: %w", atespace, name, err)
-	}
-	return dbActor, nil
+	// TODO: createRow clones the actor, which is wasteful: callers build it to
+	// pass in, so it could be stored in place. Some contract tests rely on the
+	// input staying unchanged.
+	return createRow(ctx, p.pool, rowInsert{
+		what:  "actor " + ref.String(),
+		table: "actors",
+		cols:  "atespace, name",
+		key:   []any{ref.Atespace, ref.Name},
+	}, actor)
 }
 
 func (p *Persistence) GetActor(ctx context.Context, actorRef resources.ActorRef) (*ateapi.Actor, error) {

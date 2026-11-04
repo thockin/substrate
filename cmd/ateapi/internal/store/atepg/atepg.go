@@ -395,12 +395,19 @@ func unmarshalStored(b []byte, m proto.Message) error {
 	return nil
 }
 
-func setCreateMetadata(metadata *ateapi.ResourceMetadata) {
-	metadata.Uid = uuid.NewString()
-	metadata.Version = 1
-	metadata.CreateTime = timestamppb.Now()
-	metadata.UpdateTime = metadata.CreateTime
-	metadata.DeleteTime = nil
+// newMetadata returns the metadata of a newly created object: the name and
+// atespace of from, which may be nil, with a new uid, version 1, and create and
+// update times of now.
+func newMetadata(from *ateapi.ResourceMetadata) *ateapi.ResourceMetadata {
+	now := timestamppb.Now()
+	return &ateapi.ResourceMetadata{
+		Atespace:   from.GetAtespace(),
+		Name:       from.GetName(),
+		Uid:        uuid.NewString(),
+		Version:    1,
+		CreateTime: now,
+		UpdateTime: proto.CloneOf(now),
+	}
 }
 
 // validateProtoMetadataMatchesColumns verifies that the metadata in the database
@@ -464,14 +471,6 @@ func pgErrCode(err error) string {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		return pgErr.Code
-	}
-	return ""
-}
-
-func pgErrConstraint(err error) string {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.ConstraintName
 	}
 	return ""
 }

@@ -25,34 +25,15 @@ import (
 )
 
 func (p *Persistence) CreateWorker(ctx context.Context, worker *ateapi.Worker) (*ateapi.Worker, error) {
-	dbWorker := proto.Clone(worker).(*ateapi.Worker)
-	if dbWorker.Metadata == nil {
-		dbWorker.Metadata = &ateapi.ResourceMetadata{}
-	}
-	setCreateMetadata(dbWorker.Metadata)
-
-	protoBytes, err := proto.Marshal(dbWorker)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling worker: %w", err)
-	}
-
-	created, err := p.inWorkerTx(ctx, store.WorkerEventCreated, func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error) {
-		_, err := tx.Exec(ctx, `
-			INSERT INTO workers (name, uid, version, proto)
-			VALUES ($1, $2, $3, $4)`,
-			dbWorker.GetMetadata().GetName(), dbWorker.GetMetadata().GetUid(), dbWorker.GetMetadata().GetVersion(), protoBytes)
-		if err != nil {
-			return nil, err
-		}
-		return dbWorker, nil
+	name := worker.GetMetadata().GetName()
+	return p.inWorkerTx(ctx, store.WorkerEventCreated, func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error) {
+		return createRow(ctx, tx, rowInsert{
+			what:  "worker " + name,
+			table: "workers",
+			cols:  "name",
+			key:   []any{name},
+		}, worker)
 	})
-	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, store.ErrAlreadyExists
-		}
-		return nil, fmt.Errorf("creating worker: %w", err)
-	}
-	return created, nil
 }
 
 func (p *Persistence) GetWorker(ctx context.Context, name string) (*ateapi.Worker, error) {

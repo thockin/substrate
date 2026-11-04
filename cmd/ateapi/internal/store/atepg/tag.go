@@ -71,37 +71,17 @@ func (p *Persistence) ListTags(ctx context.Context, atespace string, opts store.
 }
 
 func (p *Persistence) CreateTag(ctx context.Context, tag *ateapi.Tag) (*ateapi.Tag, error) {
-	atespace := tag.GetMetadata().GetAtespace()
-	name := tag.GetMetadata().GetName()
-	dbTag := proto.CloneOf(tag)
-	setCreateMetadata(dbTag.Metadata)
-	if err := validateSnapshotURIs(fmt.Sprintf("tag %s/%s", atespace, name), dbTag.GetStatus().GetSnapshot()); err != nil {
+	atespace, name := tag.GetMetadata().GetAtespace(), tag.GetMetadata().GetName()
+	what := fmt.Sprintf("tag %s/%s", atespace, name)
+	if err := validateSnapshotURIs(what, tag.GetStatus().GetSnapshot()); err != nil {
 		return nil, err
 	}
-	protoBytes, err := proto.Marshal(dbTag)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling tag: %w", err)
-	}
-
-	_, err = p.pool.Exec(ctx, `
-		INSERT INTO tags (atespace, name, uid, version, proto)
-		VALUES ($1, $2, $3, $4, $5)`, atespace, name,
-		dbTag.GetMetadata().GetUid(), dbTag.GetMetadata().GetVersion(), protoBytes)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, store.ErrAlreadyExists
-		}
-		if isForeignKeyViolation(err) {
-			switch pgErrConstraint(err) {
-			case "tags_atespace_fk":
-				return nil, store.ErrFailedPrecondition
-			default:
-				return nil, fmt.Errorf("inserting tag %s/%s violated unknown foreign key %q: %w", atespace, name, pgErrConstraint(err), err)
-			}
-		}
-		return nil, fmt.Errorf("inserting tag %s/%s: %w", atespace, name, err)
-	}
-	return dbTag, nil
+	return createRow(ctx, p.pool, rowInsert{
+		what:  what,
+		table: "tags",
+		cols:  "atespace, name",
+		key:   []any{atespace, name},
+	}, tag)
 }
 
 func isAllowedTagSnapshotTransition(stored, mutated *ateapi.Snapshot) bool {

@@ -21,34 +21,16 @@ import (
 	"go.ate.dev/substrate/api/ateapi/v1"
 	"go.ate.dev/substrate/cmd/ateapi/internal/store"
 	"go.ate.dev/substrate/internal/resources"
-	"google.golang.org/protobuf/proto"
 )
 
 func (p *Persistence) CreateActorTemplate(ctx context.Context, template *ateapi.ActorTemplate) (*ateapi.ActorTemplate, error) {
-	atespace, name := template.GetMetadata().GetAtespace(), template.GetMetadata().GetName()
-	dbTemplate := proto.Clone(template).(*ateapi.ActorTemplate)
-	if dbTemplate.Metadata == nil {
-		dbTemplate.Metadata = &ateapi.ResourceMetadata{}
-	}
-	setCreateMetadata(dbTemplate.Metadata)
-	protoBytes, err := proto.Marshal(dbTemplate)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling actor template: %w", err)
-	}
-	_, err = p.pool.Exec(ctx, `
-		INSERT INTO actor_templates (atespace, name, uid, version, proto)
-		VALUES ($1, $2, $3, $4, $5)`,
-		atespace, name, dbTemplate.GetMetadata().GetUid(), dbTemplate.GetMetadata().GetVersion(), protoBytes)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, store.ErrAlreadyExists
-		}
-		if isForeignKeyViolation(err) {
-			return nil, store.ErrFailedPrecondition
-		}
-		return nil, fmt.Errorf("inserting actor template %s/%s: %w", atespace, name, err)
-	}
-	return dbTemplate, nil
+	ref := resources.ActorTemplateRef{Atespace: template.GetMetadata().GetAtespace(), Name: template.GetMetadata().GetName()}
+	return createRow(ctx, p.pool, rowInsert{
+		what:  "actor template " + ref.String(),
+		table: "actor_templates",
+		cols:  "atespace, name",
+		key:   []any{ref.Atespace, ref.Name},
+	}, template)
 }
 
 func (p *Persistence) GetActorTemplate(ctx context.Context, templateRef resources.ActorTemplateRef) (*ateapi.ActorTemplate, error) {

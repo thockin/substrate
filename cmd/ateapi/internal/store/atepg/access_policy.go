@@ -20,32 +20,24 @@ import (
 
 	"go.ate.dev/substrate/api/ateapi/v1"
 	"go.ate.dev/substrate/cmd/ateapi/internal/store"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func (p *Persistence) CreateGlobalAccessPolicy(ctx context.Context, policy *ateapi.AccessPolicy) (*ateapi.AccessPolicy, error) {
-	dbPolicy := proto.Clone(policy).(*ateapi.AccessPolicy)
-	setCreateMetadata(dbPolicy.Metadata)
-	protoBytes, err := proto.Marshal(dbPolicy)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling global access policy: %w", err)
-	}
-
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("beginning global access policy create: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
 
-	_, err = tx.Exec(ctx, `
-		INSERT INTO global_access_policy (id, uid, version, proto)
-		VALUES (true, $1, $2, $3)`, dbPolicy.GetMetadata().GetUid(), dbPolicy.GetMetadata().GetVersion(), protoBytes)
+	dbPolicy, err := createRow(ctx, tx, rowInsert{
+		what:  "global access policy",
+		table: "global_access_policy",
+		cols:  "id",
+		key:   []any{true},
+	}, policy)
 	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, store.ErrAlreadyExists
-		}
-		return nil, fmt.Errorf("inserting global access policy: %w", err)
+		return nil, err
 	}
 	if err := p.policyManager.ReconcileGlobalBindings(ctx, tx, dbPolicy.GetBindings()); err != nil {
 		return nil, fmt.Errorf("reconciling global access policy bindings: %w", err)
@@ -94,30 +86,20 @@ func (p *Persistence) UpdateGlobalAccessPolicy(ctx context.Context, precondition
 }
 
 func (p *Persistence) CreateAtespaceAccessPolicy(ctx context.Context, name string, policy *ateapi.AccessPolicy) (*ateapi.AccessPolicy, error) {
-	dbPolicy := proto.Clone(policy).(*ateapi.AccessPolicy)
-	setCreateMetadata(dbPolicy.Metadata)
-	protoBytes, err := proto.Marshal(dbPolicy)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling access policy: %w", err)
-	}
-
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("beginning access policy create for %s: %w", name, err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
 
-	_, err = tx.Exec(ctx, `
-		INSERT INTO atespace_access_policies (atespace_name, uid, version, proto)
-		VALUES ($1, $2, $3, $4)`, name, dbPolicy.GetMetadata().GetUid(), dbPolicy.GetMetadata().GetVersion(), protoBytes)
+	dbPolicy, err := createRow(ctx, tx, rowInsert{
+		what:  "access policy for atespace " + name,
+		table: "atespace_access_policies",
+		cols:  "atespace_name",
+		key:   []any{name},
+	}, policy)
 	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, store.ErrAlreadyExists
-		}
-		if isForeignKeyViolation(err) {
-			return nil, store.ErrFailedPrecondition
-		}
-		return nil, fmt.Errorf("inserting access policy for %s: %w", name, err)
+		return nil, err
 	}
 	if err := p.policyManager.ReconcileAtespaceBindings(ctx, tx, name, dbPolicy.GetBindings()); err != nil {
 		return nil, fmt.Errorf("reconciling access policy bindings for %s: %w", name, err)

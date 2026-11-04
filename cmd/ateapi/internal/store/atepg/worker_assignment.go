@@ -39,8 +39,7 @@ func (p *Persistence) BindActorToWorker(ctx context.Context, workerName string, 
 	}
 	// The store assigns identity. atespace is empty because Workers are
 	// global-scoped; the name is the Actor's UID, which is also the row key.
-	assignment.Metadata = &ateapi.ResourceMetadata{Name: actorUID}
-	setCreateMetadata(assignment.Metadata)
+	assignment.Metadata = newMetadata(&ateapi.ResourceMetadata{Name: actorUID})
 	assignmentBytes, err := proto.Marshal(assignment)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling assignment: %w", err)
