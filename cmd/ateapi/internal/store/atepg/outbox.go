@@ -146,6 +146,24 @@ func (p *Persistence) outboxNow(ctx context.Context) (time.Time, error) {
 // Database-scoped advisory lock used to elect a single replica to run the retention transaction (drops + trim).
 const outboxMaintenanceLockKey = "atepg-outbox-maintenance"
 
+// outboxDDLLockTimeout bounds how long a maintenance statement waits for a
+// table lock. Creating, dropping, or truncating a partition needs ACCESS
+// EXCLUSIVE on worker_outbox, and while that request waits in the lock queue
+// every worker write queues behind it. Giving up after a short wait lets writes
+// through. The next maintenance tick retries, and the partition lead leaves
+// many ticks of slack before writes would spill into the DEFAULT partition.
+const outboxDDLLockTimeout = time.Second
+
+// boundOutboxDDLLockWaits limits every later lock wait in tx to
+// outboxDDLLockTimeout. Call it after taking the maintenance advisory lock, so
+// a replica that is waiting for another replica's pass is not cut short.
+func boundOutboxDDLLockWaits(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`, fmt.Sprintf("%dms", outboxDDLLockTimeout.Milliseconds())); err != nil {
+		return fmt.Errorf("setting outbox maintenance lock timeout: %w", err)
+	}
+	return nil
+}
+
 // pollWorkerOutboxSQL is the watch's batch query. The xid::text cast MUST
 // carry an alias so that ORDER BY xid sorts numerically by the table's xid8
 // column instead of alphabetically by the string output.
@@ -201,6 +219,9 @@ func (p *Persistence) retireStrayedOutboxDefault(ctx context.Context) error {
 	if !elected {
 		return nil // another replica is maintaining; next tick retries
 	}
+	if err := boundOutboxDDLLockWaits(ctx, tx); err != nil {
+		return err
+	}
 	// A non-empty DEFAULT partition means partition creation stalled and writes
 	// detoured here. Watchers that lose events will detect the trim mark and resync.
 	var strays bool
@@ -242,6 +263,9 @@ func (p *Persistence) dropExpiredOutboxRetention(ctx context.Context, now time.T
 	}
 	if !elected {
 		return nil // another replica is maintaining; next tick retries
+	}
+	if err := boundOutboxDDLLockWaits(ctx, tx); err != nil {
+		return err
 	}
 	// Drops run last in the pass with commit immediately after, keeping the
 	// writer-blocking window minimal.
@@ -296,6 +320,9 @@ func (p *Persistence) tryCreateWorkerOutboxPartitions(ctx context.Context, trunc
 
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('agent-substrate-atepg-outbox-partitions'))`); err != nil {
 		return fmt.Errorf("locking outbox partition DDL: %w", err)
+	}
+	if err := boundOutboxDDLLockWaits(ctx, tx); err != nil {
+		return err
 	}
 	if truncateStrays {
 		// Parent BEFORE child: Writers lock parent-then-child, so locking DEFAULT
