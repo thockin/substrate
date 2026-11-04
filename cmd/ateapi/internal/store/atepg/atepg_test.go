@@ -27,6 +27,7 @@ import (
 // the row.
 func TestList_NamesAnUndecodableRow(t *testing.T) {
 	s := setupPostgresPersistence(t)
+	waiveInvariants(s) // corrupts rows on purpose
 	ctx := context.Background()
 	createTestAtespace(t, s, "team-a")
 	createTestActorTemplate(t, s, "team-a", "t1")
