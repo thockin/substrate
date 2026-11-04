@@ -143,3 +143,64 @@ func TestListActors_CrossScopePageToken(t *testing.T) {
 		}
 	}
 }
+
+// TestUpdate_DiscardsMetadataEdits checks that an update writes the metadata
+// the store derives from the row it read, whatever mutate did to the metadata,
+// so the stored proto always names the row it is stored under.
+func TestUpdate_DiscardsMetadataEdits(t *testing.T) {
+	edits := map[string]func(md **ateapi.ResourceMetadata){
+		"renamed": func(md **ateapi.ResourceMetadata) { (*md).Name = "renamed"; (*md).Atespace = "elsewhere" },
+		"cleared": func(md **ateapi.ResourceMetadata) { *md = nil },
+	}
+	for name, edit := range edits {
+		t.Run("actor/"+name, func(t *testing.T) {
+			s := setupPostgresPersistence(t)
+			ctx := context.Background()
+			createTestAtespace(t, s, "team-a")
+			created, err := s.CreateActor(ctx, &ateapi.Actor{
+				Metadata: &ateapi.ResourceMetadata{Atespace: "team-a", Name: "a"},
+				Status:   &ateapi.ActorStatus{State: ateapi.ActorState_ACTOR_STATE_SUSPENDED},
+			})
+			if err != nil {
+				t.Fatalf("CreateActor failed: %v", err)
+			}
+			ref := resources.ActorRefFromActor(created)
+			if _, err := s.UpdateActor(ctx, ref, store.PreconditionFrom(created), func(a *ateapi.Actor) error {
+				edit(&a.Metadata)
+				return nil
+			}); err != nil {
+				t.Fatalf("UpdateActor failed: %v", err)
+			}
+			got, err := s.GetActor(ctx, ref)
+			if err != nil {
+				t.Fatalf("GetActor failed: %v", err)
+			}
+			md := got.GetMetadata()
+			if md.GetAtespace() != "team-a" || md.GetName() != "a" || md.GetUid() != created.GetMetadata().GetUid() || md.GetVersion() != 2 {
+				t.Errorf("stored metadata = %v, want team-a/a at version 2 with the created uid", md)
+			}
+		})
+		t.Run("worker/"+name, func(t *testing.T) {
+			s := setupPostgresPersistence(t)
+			ctx := context.Background()
+			created, err := s.CreateWorker(ctx, &ateapi.Worker{Metadata: &ateapi.ResourceMetadata{Name: "w"}})
+			if err != nil {
+				t.Fatalf("CreateWorker failed: %v", err)
+			}
+			if _, err := s.UpdateWorker(ctx, "w", store.PreconditionFrom(created), func(w *ateapi.Worker) error {
+				edit(&w.Metadata)
+				return nil
+			}); err != nil {
+				t.Fatalf("UpdateWorker failed: %v", err)
+			}
+			got, err := s.GetWorker(ctx, "w")
+			if err != nil {
+				t.Fatalf("GetWorker failed: %v", err)
+			}
+			md := got.GetMetadata()
+			if md.GetName() != "w" || md.GetAtespace() != "" || md.GetUid() != created.GetMetadata().GetUid() || md.GetVersion() != 2 {
+				t.Errorf("stored metadata = %v, want w at version 2 with the created uid", md)
+			}
+		})
+	}
+}

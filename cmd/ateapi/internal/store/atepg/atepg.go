@@ -439,12 +439,16 @@ func validateSnapshotURIs(resource string, snapshots ...*ateapi.Snapshot) error 
 	return nil
 }
 
-func setUpdateMetadata(newMeta, oldMeta *ateapi.ResourceMetadata) {
-	newMeta.Uid = oldMeta.Uid
-	newMeta.Version = oldMeta.Version + 1
-	newMeta.CreateTime = oldMeta.CreateTime
-	newMeta.UpdateTime = timestamppb.Now()
-	newMeta.DeleteTime = oldMeta.DeleteTime
+// nextMetadata returns the metadata an update writes over stored, the metadata
+// of the row it read: a copy of stored at the next version, with a fresh
+// update_time. The store owns metadata, so an update discards whatever its
+// mutate did to the object's metadata and replaces it with this. stored is not
+// modified.
+func nextMetadata(stored *ateapi.ResourceMetadata) *ateapi.ResourceMetadata {
+	next := proto.CloneOf(stored)
+	next.Version++
+	next.UpdateTime = timestamppb.Now()
+	return next
 }
 
 func mapDeleteError(err error, uid string, version int64, precondition store.DeletePreconditions) error {

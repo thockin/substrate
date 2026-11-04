@@ -29,8 +29,8 @@ import (
 // saveWorker writes back a Worker whose allocation just moved, at the next
 // version. This assumes the caller holds the row lock getWorkerRowForUpdate took.
 func saveWorker(ctx context.Context, tx pgx.Tx, worker *ateapi.Worker) error {
-	read := proto.CloneOf(worker.GetMetadata())
-	setUpdateMetadata(worker.GetMetadata(), worker.GetMetadata())
+	read := worker.GetMetadata()
+	worker.Metadata = nextMetadata(read)
 	protoBytes, err := proto.Marshal(worker)
 	if err != nil {
 		return fmt.Errorf("marshaling worker: %w", err)
