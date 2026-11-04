@@ -327,13 +327,13 @@ func newPersistence(ctx context.Context, pool, watchPool, ownerPool, probePool *
 		stopMaintenance()
 		return nil, err
 	}
-	if err := p.createWorkerOutboxPartitions(ctx, outboxPartitionLeadTimes(bootNow)...); err != nil {
+	if err := p.createOutboxPartitions(ctx, outboxPartitionLeadTimes(bootNow)...); err != nil {
 		stopMaintenance()
 		return nil, err
 	}
 	go func() {
 		defer close(p.maintenanceDone)
-		p.maintenance(maintenanceCtx)
+		p.runMaintenance(maintenanceCtx)
 	}()
 	return p, nil
 }
@@ -410,9 +410,9 @@ func newMetadata(from *ateapi.ResourceMetadata) *ateapi.ResourceMetadata {
 	}
 }
 
-// validateProtoMetadataMatchesColumns verifies that the metadata in the database
+// checkMetadataColumns verifies that the metadata in the database
 // matches the metadata in the proto.
-func validateProtoMetadataMatchesColumns(resource string, metadata *ateapi.ResourceMetadata, uid string, version int64) error {
+func checkMetadataColumns(resource string, metadata *ateapi.ResourceMetadata, uid string, version int64) error {
 	if metadata.GetUid() != uid {
 		return fmt.Errorf("%s uid projection %q does not match proto metadata uid %q", resource, uid, metadata.GetUid())
 	}
@@ -482,7 +482,7 @@ const (
 
 // Maintains worker_outbox partitions and reaps expired leases on a fixed
 // timer. The two are independent: a failure in one still lets the other run.
-func (p *Persistence) maintenance(ctx context.Context) {
+func (p *Persistence) runMaintenance(ctx context.Context) {
 	ticker := time.NewTicker(maintenanceInterval)
 	defer ticker.Stop()
 	for {
@@ -492,7 +492,7 @@ func (p *Persistence) maintenance(ctx context.Context) {
 		case <-ticker.C:
 		}
 		passCtx, cancel := context.WithTimeout(ctx, maintenancePassTimeout)
-		if err := p.maintainWorkerOutboxPartitions(passCtx); err != nil && ctx.Err() == nil {
+		if err := p.maintainOutbox(passCtx); err != nil && ctx.Err() == nil {
 			slog.WarnContext(ctx, "worker outbox maintenance failed", slog.Any("err", err))
 		}
 		if deleted, err := p.cleanupExpiredLeases(passCtx); err != nil && ctx.Err() == nil {

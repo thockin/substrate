@@ -83,7 +83,7 @@ func updateRow[T resource](ctx context.Context, q querier, u rowUpdate[T]) (T, e
 	if err := unmarshalStored(protoBytes, obj); err != nil {
 		return zero, fmt.Errorf("unmarshaling %s for update: %w", u.what, err)
 	}
-	if err := validateProtoMetadataMatchesColumns(u.what, obj.GetMetadata(), uid, version); err != nil {
+	if err := checkMetadataColumns(u.what, obj.GetMetadata(), uid, version); err != nil {
 		return zero, err
 	}
 	if err := u.precondition.Check(obj.GetMetadata()); err != nil {
@@ -210,7 +210,7 @@ func getRow[T resource](ctx context.Context, q querier, what, query string, args
 	if err := unmarshalStored(protoBytes, obj); err != nil {
 		return zero, fmt.Errorf("unmarshaling %s: %w", what, err)
 	}
-	if err := validateProtoMetadataMatchesColumns(what, obj.GetMetadata(), uid, version); err != nil {
+	if err := checkMetadataColumns(what, obj.GetMetadata(), uid, version); err != nil {
 		return zero, err
 	}
 	return obj, nil
