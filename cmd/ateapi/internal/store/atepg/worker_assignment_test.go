@@ -152,3 +152,48 @@ func TestBindActorToWorker_DropsUnknownWorkerFields(t *testing.T) {
 		t.Errorf("bind wrote back %d bytes of unknown fields, want 0", n)
 	}
 }
+
+// TestWorkerAssignments_DropUnknownFields checks that assignments are served
+// without fields this binary does not know, as resources are.
+func TestWorkerAssignments_DropUnknownFields(t *testing.T) {
+	s := setupPostgresPersistence(t)
+	ctx := context.Background()
+	createTestAtespace(t, s, "team-a")
+	if _, err := s.CreateWorker(ctx, &ateapi.Worker{Metadata: &ateapi.ResourceMetadata{Name: "w"}}); err != nil {
+		t.Fatalf("CreateWorker failed: %v", err)
+	}
+	actor, err := s.CreateActor(ctx, &ateapi.Actor{
+		Metadata: &ateapi.ResourceMetadata{Atespace: "team-a", Name: "a"},
+		Status:   &ateapi.ActorStatus{State: ateapi.ActorState_ACTOR_STATE_SUSPENDED},
+	})
+	if err != nil {
+		t.Fatalf("CreateActor failed: %v", err)
+	}
+	uid := actor.GetMetadata().GetUid()
+	assignment := &ateapi.ActorAssignment{Actor: &ateapi.ObjectRef{Atespace: "team-a", Name: "a"}, ActorUid: uid}
+	if _, err := s.BindActorToWorker(ctx, "w", assignment, nil, resources.ActorRefFromActor(actor), store.PreconditionFrom(actor), nil); err != nil {
+		t.Fatalf("BindActorToWorker failed: %v", err)
+	}
+	unknown := protowire.AppendVarint(protowire.AppendTag(nil, 9999, protowire.VarintType), 1)
+	if _, err := s.pool.Exec(ctx, `UPDATE worker_assignments SET proto = proto || $1 WHERE actor_uid = $2`, unknown, uid); err != nil {
+		t.Fatalf("planting an unknown field: %v", err)
+	}
+
+	got, err := s.GetWorkerAssignment(ctx, "w", uid)
+	if err != nil {
+		t.Fatalf("GetWorkerAssignment failed: %v", err)
+	}
+	if n := len(got.ProtoReflect().GetUnknown()); n != 0 {
+		t.Errorf("GetWorkerAssignment served %d bytes of unknown fields, want 0", n)
+	}
+	page, err := s.ListWorkerAssignments(ctx, "w", store.ListOptions{})
+	if err != nil {
+		t.Fatalf("ListWorkerAssignments failed: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("ListWorkerAssignments returned %d items, want 1", len(page.Items))
+	}
+	if n := len(page.Items[0].ProtoReflect().GetUnknown()); n != 0 {
+		t.Errorf("ListWorkerAssignments served %d bytes of unknown fields, want 0", n)
+	}
+}

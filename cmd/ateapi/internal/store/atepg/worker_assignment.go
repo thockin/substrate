@@ -170,11 +170,11 @@ func releaseActor(ctx context.Context, tx pgx.Tx, actorUID string) (*ateapi.Work
 	if err != nil {
 		return nil, fmt.Errorf("releasing actor %s from worker %s: %w", actorUID, workerName, err)
 	}
-	assignment := &ateapi.ActorAssignment{}
-	if err := proto.Unmarshal(protoBytes, assignment); err != nil {
+	var assignment ateapi.ActorAssignment
+	if err := unmarshalStored(protoBytes, &assignment); err != nil {
 		return nil, fmt.Errorf("unmarshaling released assignment: %w", err)
 	}
-	worker.Status.Allocated = resources.AddToAllocated(worker.Status.Allocated, assignment, -1)
+	worker.Status.Allocated = resources.AddToAllocated(worker.Status.Allocated, &assignment, -1)
 	if err := saveWorker(ctx, tx, worker); err != nil {
 		return nil, err
 	}
@@ -196,11 +196,11 @@ func getAssignmentRow(ctx context.Context, q querier, actorUID string) (*ateapi.
 		}
 		return nil, "", fmt.Errorf("getting assignment for actor %s: %w", actorUID, err)
 	}
-	assignment := &ateapi.ActorAssignment{}
-	if err := proto.Unmarshal(protoBytes, assignment); err != nil {
+	var assignment ateapi.ActorAssignment
+	if err := unmarshalStored(protoBytes, &assignment); err != nil {
 		return nil, "", fmt.Errorf("unmarshaling assignment: %w", err)
 	}
-	return assignment, workerName, nil
+	return &assignment, workerName, nil
 }
 
 func (p *Persistence) GetWorkerAssignment(ctx context.Context, workerName, actorUID string) (*ateapi.ActorAssignment, error) {
@@ -249,11 +249,11 @@ func (p *Persistence) ListWorkerAssignments(ctx context.Context, workerName stri
 		if err := rows.Scan(&actorUID, &protoBytes); err != nil {
 			return store.ListResponse[*ateapi.ActorAssignment]{}, fmt.Errorf("scanning assignment of worker %s: %w", workerName, err)
 		}
-		assignment := &ateapi.ActorAssignment{}
-		if err := proto.Unmarshal(protoBytes, assignment); err != nil {
+		var assignment ateapi.ActorAssignment
+		if err := unmarshalStored(protoBytes, &assignment); err != nil {
 			return store.ListResponse[*ateapi.ActorAssignment]{}, fmt.Errorf("unmarshaling assignment of actor %s: %w", actorUID, err)
 		}
-		result = append(result, assignment)
+		result = append(result, &assignment)
 		uids = append(uids, actorUID)
 	}
 	if err := rows.Err(); err != nil {

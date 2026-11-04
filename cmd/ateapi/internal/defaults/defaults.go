@@ -32,6 +32,8 @@ func Apply(m proto.Message) {
 		applyAccessPolicyDefaults(v)
 	case *ateapi.Actor:
 		applyActorDefaults(v)
+	case *ateapi.ActorAssignment:
+		applyActorAssignmentDefaults(v)
 	case *ateapi.ActorTemplate:
 		applyActorTemplateDefaults(v)
 	case *ateapi.Atespace:
@@ -46,6 +48,8 @@ func Apply(m proto.Message) {
 		panic(fmt.Sprintf("unknown resource message %T", m))
 	}
 }
+
+func applyActorAssignmentDefaults(*ateapi.ActorAssignment) {}
 
 func applyActorTemplateDefaults(t *ateapi.ActorTemplate) {
 	if t == nil {
