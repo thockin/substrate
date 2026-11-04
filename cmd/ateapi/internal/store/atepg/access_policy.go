@@ -75,29 +75,17 @@ func (p *Persistence) UpdateGlobalAccessPolicy(ctx context.Context, precondition
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
 
-	dbPolicy, err := getAccessPolicyRow(ctx, tx, `
-		SELECT uid, version, proto FROM global_access_policy
-		WHERE id = true FOR UPDATE`)
+	// The guarded UPDATE leaves the row locked until commit, so the bindings
+	// reconciled below are those of the policy this transaction wrote.
+	dbPolicy, err := updateRow(ctx, tx, rowUpdate[*ateapi.AccessPolicy]{
+		what:         "global access policy",
+		table:        "global_access_policy",
+		where:        "id = true",
+		precondition: store.DeletePreconditions(precondition),
+		mutate:       mutate,
+	})
 	if err != nil {
 		return nil, err
-	}
-	if err := precondition.Check(dbPolicy.GetMetadata()); err != nil {
-		return nil, err
-	}
-	oldMeta := proto.CloneOf(dbPolicy.Metadata)
-	if err := mutate(dbPolicy); err != nil {
-		return nil, err
-	}
-	dbPolicy.Metadata = nextMetadata(oldMeta)
-	protoBytes, err := proto.Marshal(dbPolicy)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling updated global access policy: %w", err)
-	}
-	_, err = tx.Exec(ctx, `
-		UPDATE global_access_policy SET version = $1, proto = $2
-		WHERE id = true`, dbPolicy.GetMetadata().GetVersion(), protoBytes)
-	if err != nil {
-		return nil, fmt.Errorf("updating global access policy: %w", err)
 	}
 	if err := p.policyManager.ReconcileGlobalBindings(ctx, tx, dbPolicy.GetBindings()); err != nil {
 		return nil, fmt.Errorf("reconciling global access policy bindings: %w", err)
@@ -160,29 +148,18 @@ func (p *Persistence) UpdateAtespaceAccessPolicy(ctx context.Context, name strin
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
 
-	dbPolicy, err := getAccessPolicyRow(ctx, tx, `
-		SELECT uid, version, proto FROM atespace_access_policies
-		WHERE atespace_name = $1 FOR UPDATE`, name)
+	// The guarded UPDATE leaves the row locked until commit, so the bindings
+	// reconciled below are those of the policy this transaction wrote.
+	dbPolicy, err := updateRow(ctx, tx, rowUpdate[*ateapi.AccessPolicy]{
+		what:         "access policy for atespace " + name,
+		table:        "atespace_access_policies",
+		where:        "atespace_name = $1",
+		key:          []any{name},
+		precondition: store.DeletePreconditions(precondition),
+		mutate:       mutate,
+	})
 	if err != nil {
 		return nil, err
-	}
-	if err := precondition.Check(dbPolicy.GetMetadata()); err != nil {
-		return nil, err
-	}
-	oldMeta := proto.CloneOf(dbPolicy.Metadata)
-	if err := mutate(dbPolicy); err != nil {
-		return nil, err
-	}
-	dbPolicy.Metadata = nextMetadata(oldMeta)
-	protoBytes, err := proto.Marshal(dbPolicy)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling updated access policy: %w", err)
-	}
-	_, err = tx.Exec(ctx, `
-		UPDATE atespace_access_policies SET version = $1, proto = $2
-		WHERE atespace_name = $3`, dbPolicy.GetMetadata().GetVersion(), protoBytes, name)
-	if err != nil {
-		return nil, fmt.Errorf("updating access policy for %s: %w", name, err)
 	}
 	if err := p.policyManager.ReconcileAtespaceBindings(ctx, tx, name, dbPolicy.GetBindings()); err != nil {
 		return nil, fmt.Errorf("reconciling access policy bindings for %s: %w", name, err)
