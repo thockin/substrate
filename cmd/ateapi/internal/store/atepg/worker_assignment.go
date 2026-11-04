@@ -225,9 +225,14 @@ func (p *Persistence) ListWorkerAssignments(ctx context.Context, workerName stri
 		scope:    workerName,
 		idParts:  1,
 		keyParts: 1,
-		sql: `
+		firstSQL: `
 			SELECT actor_uid, proto FROM worker_assignments
-			WHERE worker_name = $1 AND ($2::text IS NULL OR actor_uid > $2)
+			WHERE worker_name = $1
+			ORDER BY actor_uid
+			LIMIT $2`,
+		nextSQL: `
+			SELECT actor_uid, proto FROM worker_assignments
+			WHERE worker_name = $1 AND actor_uid > $2
 			ORDER BY actor_uid
 			LIMIT $3`,
 		args: []any{workerName},

@@ -73,9 +73,13 @@ func (p *Persistence) ListAtespaces(ctx context.Context, opts store.ListOptions)
 		kind:     kindAtespace,
 		idParts:  1,
 		keyParts: 1,
-		sql: `
+		firstSQL: `
 			SELECT name, proto FROM atespaces
-			WHERE $1::text IS NULL OR name > $1
+			ORDER BY name
+			LIMIT $1`,
+		nextSQL: `
+			SELECT name, proto FROM atespaces
+			WHERE name > $1
 			ORDER BY name
 			LIMIT $2`,
 	}, opts, decodeStored[*ateapi.Atespace]())

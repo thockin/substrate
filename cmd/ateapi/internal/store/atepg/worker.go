@@ -195,9 +195,13 @@ func (p *Persistence) ListWorkers(ctx context.Context, opts store.ListOptions) (
 		kind:     kindWorker,
 		idParts:  1,
 		keyParts: 1,
-		sql: `
+		firstSQL: `
 			SELECT name, proto FROM workers
-			WHERE $1::text IS NULL OR name > $1
+			ORDER BY name
+			LIMIT $1`,
+		nextSQL: `
+			SELECT name, proto FROM workers
+			WHERE name > $1
 			ORDER BY name
 			LIMIT $2`,
 	}, opts, decodeStored[*ateapi.Worker]())
