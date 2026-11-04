@@ -26,33 +26,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// saveWorker writes back a Worker whose allocation just moved, at the next
-// version. This assumes the worker's row is locked (see
-// getWorkerRowForUpdate), so does not need to check preconditions.
-func saveWorker(ctx context.Context, tx pgx.Tx, worker *ateapi.Worker) error {
-	currentUID := worker.GetMetadata().GetUid()
-	currentVersion := worker.GetMetadata().GetVersion()
-	worker.Metadata = setUpdateMetadata(worker.Metadata)
-	protoBytes, err := proto.Marshal(worker)
-	if err != nil {
-		return fmt.Errorf("marshaling worker: %w", err)
-	}
-	meta := worker.GetMetadata()
-	// Callers hold the row lock getWorkerRowForUpdate took, so this matches the
-	// row they read. It is stated anyway so a caller that skipped the lock
-	// fails loudly instead of overwriting a newer Worker, and so a row that is
-	// gone is an error rather than an update of nothing.
-	tag, err := tx.Exec(ctx, `UPDATE workers SET version = $1, proto = $2 WHERE name = $3 AND uid = $4 AND version = $5`,
-		meta.GetVersion(), protoBytes, meta.GetName(), currentUID, currentVersion)
-	if err != nil {
-		return fmt.Errorf("updating worker %s: %w", meta.GetName(), err)
-	}
-	if tag.RowsAffected() != 1 {
-		return store.ErrVersionConflict
-	}
-	return nil
-}
-
 func (p *Persistence) BindActorToWorker(ctx context.Context, workerName string, assignment *ateapi.ActorAssignment, admit func(*ateapi.Worker) error, actorRef resources.ActorRef, precondition store.Precondition, mutate func(*ateapi.Actor) error) (*ateapi.Actor, error) {
 	actorUID := assignment.GetActorUid()
 	if actorUID == "" {
@@ -74,8 +47,8 @@ func (p *Persistence) BindActorToWorker(ctx context.Context, workerName string, 
 	}
 
 	var updated *ateapi.Actor
-	_, err = p.writeAndAppendEvent(ctx, store.WorkerEventUpdated, func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error) {
-		worker, err := getWorkerRowForUpdate(ctx, tx, workerName)
+	_, err = p.inWorkerTx(ctx, store.WorkerEventUpdated, func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error) {
+		worker, err := lockWorker(ctx, tx, workerName)
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, store.ErrWorkerNotFound
 		}
@@ -104,7 +77,7 @@ func (p *Persistence) BindActorToWorker(ctx context.Context, workerName string, 
 			return nil, fmt.Errorf("binding actor %s to worker %s: %w", actorUID, workerName, err)
 		}
 		worker.Status.Allocated = resources.AddToAllocated(worker.Status.Allocated, assignment, +1)
-		if err := saveWorker(ctx, tx, worker); err != nil {
+		if err := writeLockedWorker(ctx, tx, workerName, worker, worker.GetMetadata(), false); err != nil {
 			return nil, err
 		}
 		return worker, nil
@@ -121,8 +94,8 @@ func (p *Persistence) UpdateActorAndRelease(ctx context.Context, actorRef resour
 	}
 	actorUID := precondition.UID
 	var updated *ateapi.Actor
-	_, err := p.writeAndAppendEvent(ctx, store.WorkerEventUpdated, func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error) {
-		released, err := releaseActor(ctx, tx, actorUID)
+	_, err := p.inWorkerTx(ctx, store.WorkerEventUpdated, func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error) {
+		released, err := releaseAssignment(ctx, tx, actorUID)
 		if err != nil {
 			return nil, err
 		}
@@ -139,20 +112,20 @@ func (p *Persistence) UpdateActorAndRelease(ctx context.Context, actorRef resour
 	return updated, nil
 }
 
-// releaseActor deletes actorUID's assignment, wherever it is, and returns the
+// releaseAssignment deletes actorUID's assignment, wherever it is, and returns the
 // Worker that held it as saved with the assignment no longer booked, or nil if
 // no Worker held it. The Worker is locked before its assignment row, as
 // BindActorToWorker locks it, so the first read only finds which Worker to
 // lock.
-func releaseActor(ctx context.Context, tx pgx.Tx, actorUID string) (*ateapi.Worker, error) {
-	_, workerName, err := getAssignmentRow(ctx, tx, actorUID)
+func releaseAssignment(ctx context.Context, tx pgx.Tx, actorUID string) (*ateapi.Worker, error) {
+	_, workerName, err := getAssignment(ctx, tx, actorUID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	worker, err := getWorkerRowForUpdate(ctx, tx, workerName)
+	worker, err := lockWorker(ctx, tx, workerName)
 	if errors.Is(err, store.ErrNotFound) {
 		// A Worker is deleted only once it holds no assignments, so the row
 		// was released after the first read.
@@ -178,15 +151,15 @@ func releaseActor(ctx context.Context, tx pgx.Tx, actorUID string) (*ateapi.Work
 		return nil, fmt.Errorf("unmarshaling released assignment: %w", err)
 	}
 	worker.Status.Allocated = resources.AddToAllocated(worker.Status.Allocated, &assignment, -1)
-	if err := saveWorker(ctx, tx, worker); err != nil {
+	if err := writeLockedWorker(ctx, tx, workerName, worker, worker.GetMetadata(), false); err != nil {
 		return nil, err
 	}
 	return worker, nil
 }
 
-// getAssignmentRow reads the assignment for actorUID and names the worker
+// getAssignment reads the assignment for actorUID and names the worker
 // holding it.
-func getAssignmentRow(ctx context.Context, q querier, actorUID string) (*ateapi.ActorAssignment, string, error) {
+func getAssignment(ctx context.Context, q querier, actorUID string) (*ateapi.ActorAssignment, string, error) {
 	var (
 		protoBytes []byte
 		workerName string
@@ -207,7 +180,7 @@ func getAssignmentRow(ctx context.Context, q querier, actorUID string) (*ateapi.
 }
 
 func (p *Persistence) GetWorkerAssignment(ctx context.Context, workerName, actorUID string) (*ateapi.ActorAssignment, error) {
-	assignment, holder, err := getAssignmentRow(ctx, p.pool, actorUID)
+	assignment, holder, err := getAssignment(ctx, p.pool, actorUID)
 	if err != nil {
 		return nil, err
 	}

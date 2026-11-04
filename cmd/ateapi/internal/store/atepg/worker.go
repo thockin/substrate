@@ -37,7 +37,7 @@ func (p *Persistence) CreateWorker(ctx context.Context, worker *ateapi.Worker) (
 		return nil, fmt.Errorf("marshaling worker: %w", err)
 	}
 
-	created, err := p.writeAndAppendEvent(ctx, store.WorkerEventCreated, func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error) {
+	created, err := p.inWorkerTx(ctx, store.WorkerEventCreated, func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error) {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO workers (name, uid, version, proto)
 			VALUES ($1, $2, $3, $4)`,
@@ -56,10 +56,9 @@ func (p *Persistence) CreateWorker(ctx context.Context, worker *ateapi.Worker) (
 	return created, nil
 }
 
-func getWorkerRow(ctx context.Context, q querier, name string) (*ateapi.Worker, error) {
+func (p *Persistence) GetWorker(ctx context.Context, name string) (*ateapi.Worker, error) {
 	var protoBytes []byte
-	err := q.QueryRow(ctx, `SELECT proto FROM workers WHERE name = $1`, name).Scan(&protoBytes)
-	if err != nil {
+	if err := p.pool.QueryRow(ctx, `SELECT proto FROM workers WHERE name = $1`, name).Scan(&protoBytes); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
@@ -72,21 +71,20 @@ func getWorkerRow(ctx context.Context, q querier, name string) (*ateapi.Worker, 
 	return out, nil
 }
 
-func (p *Persistence) GetWorker(ctx context.Context, name string) (*ateapi.Worker, error) {
-	return getWorkerRow(ctx, p.pool, name)
-}
-
-// getWorkerRowForUpdate reads the worker and holds its row lock for the rest of
-// tx, so nothing else can write the row between this read and the write that
-// follows it. Every write to a Worker row takes this lock first, which is what
-// serializes updates to its allocation. Returns ErrNotFound if the row is gone.
-func getWorkerRowForUpdate(ctx context.Context, tx pgx.Tx, name string) (*ateapi.Worker, error) {
+// lockWorker reads a Worker and locks its row until tx ends. Every write to a
+// Worker row takes this lock before it reads the row, so a writer always sees
+// the latest committed Worker and nothing can change it before the writer
+// commits. That is what serializes updates to a Worker's allocation, and lets
+// admit and UpdateWorker's mutate act as a compare-and-set.
+//
+// Returns ErrNotFound if the row does not exist.
+func lockWorker(ctx context.Context, tx pgx.Tx, name string) (*ateapi.Worker, error) {
 	var protoBytes []byte
 	if err := tx.QueryRow(ctx, `SELECT proto FROM workers WHERE name = $1 FOR UPDATE`, name).Scan(&protoBytes); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, store.ErrNotFound
 		}
-		return nil, fmt.Errorf("locking worker %s for update: %w", name, err)
+		return nil, fmt.Errorf("locking worker %s: %w", name, err)
 	}
 	out := &ateapi.Worker{}
 	if err := unmarshalStored(protoBytes, out); err != nil {
@@ -95,11 +93,35 @@ func getWorkerRowForUpdate(ctx context.Context, tx pgx.Tx, name string) (*ateapi
 	return out, nil
 }
 
-// UpdateWorker runs mutate against the worker read FOR UPDATE inside the write
-// transaction, so a concurrent writer blocks on the row lock rather than
-// interleaving. That is what makes an occupancy test inside mutate a
-// compare-and-set. The predicate cannot be pushed into SQL: the row stores an
-// opaque marshaled proto, so assignment is not addressable in a WHERE clause.
+// writeLockedWorker writes worker over the row keyed name, at
+// nextMetadata(stored, markForDeletion), where stored is the metadata
+// lockWorker read, and sets worker.Metadata to what it wrote. The caller must hold the row lock from
+// lockWorker in tx.
+//
+// The UPDATE is guarded on stored's uid and version. Under the lock the guard
+// always holds, but it turns a caller that forgot the lock, or a row that is
+// gone, into ErrVersionConflict instead of a lost update or a silent no-op.
+func writeLockedWorker(ctx context.Context, tx pgx.Tx, name string, worker *ateapi.Worker, stored *ateapi.ResourceMetadata, markForDeletion bool) error {
+	worker.Metadata = setUpdateMetadata(stored, markForDeletion)
+	protoBytes, err := proto.Marshal(worker)
+	if err != nil {
+		return fmt.Errorf("marshaling worker: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `UPDATE workers SET version = $1, proto = $2 WHERE name = $3 AND uid = $4 AND version = $5`,
+		worker.GetMetadata().GetVersion(), protoBytes, name, stored.GetUid(), stored.GetVersion())
+	if err != nil {
+		return fmt.Errorf("updating worker %s: %w", name, err)
+	}
+	if tag.RowsAffected() != 1 {
+		return store.ErrVersionConflict
+	}
+	return nil
+}
+
+// UpdateWorker runs mutate against the Worker as locked by lockWorker, so a
+// concurrent writer blocks on the row lock rather than interleaving. That makes
+// a test inside mutate, such as an occupancy check, a compare-and-set. The
+// test cannot be pushed into SQL, because the row stores an opaque proto.
 func (p *Persistence) UpdateWorker(ctx context.Context, name string, precondition store.Precondition, mutate func(*ateapi.Worker) error) (*ateapi.Worker, error) {
 	if err := precondition.Validate(); err != nil {
 		return nil, err
@@ -112,8 +134,8 @@ func (p *Persistence) MarkWorkerForDeletion(ctx context.Context, name string, pr
 }
 
 func (p *Persistence) updateWorker(ctx context.Context, name string, precondition store.DeletePreconditions, mutate func(*ateapi.Worker) error, markForDeletion bool) (*ateapi.Worker, error) {
-	return p.writeAndAppendEvent(ctx, store.WorkerEventUpdated, func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error) {
-		dbWorker, err := getWorkerRowForUpdate(ctx, tx, name)
+	return p.inWorkerTx(ctx, store.WorkerEventUpdated, func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error) {
+		dbWorker, err := lockWorker(ctx, tx, name)
 		if err != nil {
 			return nil, err
 		}
@@ -121,47 +143,26 @@ func (p *Persistence) updateWorker(ctx context.Context, name string, preconditio
 			return nil, err
 		}
 
-		// Snapshot the stored metadata before handing the worker to mutate.
-		// mutate is free to edit anything it is given; immutable fields are
-		// the service layer's to enforce, via declarative validation.
-		oldMeta := proto.CloneOf(dbWorker.GetMetadata())
+		// mutate may edit anything it is given. Immutable fields are the
+		// service layer's to enforce, via declarative validation.
+		stored := proto.CloneOf(dbWorker.GetMetadata())
 		if mutate != nil {
 			if err := mutate(dbWorker); err != nil {
 				return nil, err
 			}
 		}
-		// Stored metadata is authoritative; discard any metadata edits made by
-		// the closure and derive the next revision from the row we locked.
-		dbWorker.Metadata = setUpdateMetadata(oldMeta)
-		if markForDeletion && dbWorker.Metadata.DeleteTime == nil {
-			dbWorker.Metadata.DeleteTime = proto.CloneOf(dbWorker.Metadata.UpdateTime)
-		}
-
-		protoBytes, err := proto.Marshal(dbWorker)
-		if err != nil {
-			return nil, fmt.Errorf("marshaling worker: %w", err)
-		}
-
-		commandTag, err := tx.Exec(ctx, `
-			UPDATE workers
-			SET version = $1, proto = $2
-			WHERE name = $3`,
-			dbWorker.GetMetadata().GetVersion(), protoBytes, name)
-		if err != nil {
-			return nil, fmt.Errorf("updating worker %s: %w", name, err)
-		}
-		if commandTag.RowsAffected() != 1 {
-			return nil, fmt.Errorf("updating worker %s affected %d rows, want 1", name, commandTag.RowsAffected())
+		if err := writeLockedWorker(ctx, tx, name, dbWorker, stored, markForDeletion); err != nil {
+			return nil, err
 		}
 		return dbWorker, nil
 	})
 }
 
 func (p *Persistence) DeleteWorker(ctx context.Context, name string, precondition store.DeletePreconditions) (*ateapi.Worker, error) {
-	return p.writeAndAppendEvent(ctx, store.WorkerEventDeleted, func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error) {
+	return p.inWorkerTx(ctx, store.WorkerEventDeleted, func(ctx context.Context, tx pgx.Tx) (*ateapi.Worker, error) {
 		// Locked rather than plainly read so the incarnation precondition was evaluated
 		// against is the one the DELETE removes.
-		deleted, err := getWorkerRowForUpdate(ctx, tx, name)
+		deleted, err := lockWorker(ctx, tx, name)
 		if err != nil {
 			return nil, err
 		}

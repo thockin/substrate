@@ -26,10 +26,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// TestSaveWorker_RejectsAStaleWrite proves the precondition saveWorker states
-// on top of the row lock its callers hold: a Worker read before someone else
-// wrote it cannot overwrite that write.
-func TestSaveWorker_RejectsAStaleWrite(t *testing.T) {
+// TestWriteLockedWorker_RejectsAStaleWrite proves the guard writeLockedWorker
+// states on top of the row lock its callers hold: a Worker read before someone
+// else wrote it cannot overwrite that write.
+func TestWriteLockedWorker_RejectsAStaleWrite(t *testing.T) {
 	requirePool(t)
 	ctx := context.Background()
 
@@ -64,14 +64,14 @@ func TestSaveWorker_RejectsAStaleWrite(t *testing.T) {
 		t.Fatalf("Begin failed: %v", err)
 	}
 	defer tx.Rollback(ctx)
-	if err := saveWorker(ctx, tx, created); !errors.Is(err, store.ErrVersionConflict) {
-		t.Errorf("saveWorker() with a stale Worker = %v, want ErrVersionConflict", err)
+	if err := writeLockedWorker(ctx, tx, created.GetMetadata().GetName(), created, created.GetMetadata(), false); !errors.Is(err, store.ErrVersionConflict) {
+		t.Errorf("writeLockedWorker() with a stale Worker = %v, want ErrVersionConflict", err)
 	}
 }
 
-// TestSaveWorker_RejectsAVanishedWorker keeps a deleted row from being an
-// update of nothing.
-func TestSaveWorker_RejectsAVanishedWorker(t *testing.T) {
+// TestWriteLockedWorker_RejectsAVanishedWorker keeps a deleted row from being
+// an update of nothing.
+func TestWriteLockedWorker_RejectsAVanishedWorker(t *testing.T) {
 	requirePool(t)
 	ctx := context.Background()
 
@@ -101,8 +101,8 @@ func TestSaveWorker_RejectsAVanishedWorker(t *testing.T) {
 		t.Fatalf("Begin failed: %v", err)
 	}
 	defer tx.Rollback(ctx)
-	if err := saveWorker(ctx, tx, created); !errors.Is(err, store.ErrVersionConflict) {
-		t.Errorf("saveWorker() on a deleted Worker = %v, want ErrVersionConflict", err)
+	if err := writeLockedWorker(ctx, tx, created.GetMetadata().GetName(), created, created.GetMetadata(), false); !errors.Is(err, store.ErrVersionConflict) {
+		t.Errorf("writeLockedWorker() on a deleted Worker = %v, want ErrVersionConflict", err)
 	}
 }
 

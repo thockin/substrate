@@ -434,9 +434,12 @@ func validateSnapshotURIs(resource string, snapshots ...*ateapi.Snapshot) error 
 // setUpdateMetadata modifies the input metadata for an update operation and
 // returns it. There are no mutable metadata fields yet. If some are added in
 // the future, (e.g. labels), this would take 2 params and merge them.
-func setUpdateMetadata(metadata *ateapi.ResourceMetadata) *ateapi.ResourceMetadata {
+func setUpdateMetadata(metadata *ateapi.ResourceMetadata, markForDeletion bool) *ateapi.ResourceMetadata {
 	metadata.Version++
 	metadata.UpdateTime = timestamppb.Now()
+	if markForDeletion && metadata.DeleteTime == nil {
+		metadata.DeleteTime = proto.CloneOf(metadata.UpdateTime)
+	}
 	return metadata
 }
 

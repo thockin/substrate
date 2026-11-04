@@ -100,10 +100,7 @@ func updateRow[T resource](ctx context.Context, q querier, u rowUpdate[T]) (T, e
 			return zero, err
 		}
 	}
-	next := setUpdateMetadata(storedMeta)
-	if u.markForDeletion && next.DeleteTime == nil {
-		next.DeleteTime = proto.CloneOf(next.UpdateTime)
-	}
+	next := setUpdateMetadata(storedMeta, u.markForDeletion)
 	setMetadata(obj, next)
 
 	updatedBytes, err := proto.Marshal(obj)
