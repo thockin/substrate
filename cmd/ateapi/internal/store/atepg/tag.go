@@ -229,6 +229,7 @@ func (p *Persistence) updateTag(ctx context.Context, tagRef resources.TagRef, pr
 			return nil, err
 		}
 	}
+	// TODO: this should be done through DV and removed from here
 	if err := validateSnapshotURIs(fmt.Sprintf("tag %s/%s", atespace, name), dbTag.GetStatus().GetSnapshot()); err != nil {
 		return nil, err
 	}

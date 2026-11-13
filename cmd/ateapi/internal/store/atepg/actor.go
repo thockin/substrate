@@ -122,6 +122,7 @@ func updateActor(ctx context.Context, q querier, actorRef resources.ActorRef, pr
 			return nil, err
 		}
 	}
+	// TODO: this should be done through DV and removed from here
 	if err := validateSnapshotURIs("actor "+actorRef.String(), dbActor.GetStatus().GetSnapshots()...); err != nil {
 		return nil, err
 	}
