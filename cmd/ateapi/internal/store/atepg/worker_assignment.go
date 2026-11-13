@@ -27,7 +27,8 @@ import (
 )
 
 // saveWorker writes back a Worker whose allocation just moved, at the next
-// version. This assumes the caller holds the row lock getWorkerRowForUpdate took.
+// version. This assumes the worker's row is locked (see
+// getWorkerRowForUpdate), so does not need to check preconditions.
 func saveWorker(ctx context.Context, tx pgx.Tx, worker *ateapi.Worker) error {
 	currentUID := worker.GetMetadata().GetUid()
 	currentVersion := worker.GetMetadata().GetVersion()
