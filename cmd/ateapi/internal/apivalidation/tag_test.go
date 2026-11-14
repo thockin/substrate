@@ -62,6 +62,61 @@ func TestValidateCreateTagRequest(t *testing.T) {
 			wantError: nil,
 		},
 		{
+			// A reserved tag has no snapshot until the tag workflow records it.
+			name: "valid with status but no snapshot",
+			req: &ateapi.CreateTagRequest{
+				Tag: validTag(func(tag *ateapi.Tag) {
+					tag.Status = &ateapi.TagStatus{ActorTemplateUid: someActorUID}
+				}),
+			},
+			wantError: nil,
+		},
+		{
+			name: "invalid tag.status.snapshot",
+			req: &ateapi.CreateTagRequest{
+				Tag: validTag(func(tag *ateapi.Tag) {
+					tag.Status = &ateapi.TagStatus{
+						Snapshot:         badSnapshot(),
+						ActorTemplateUid: someActorUID,
+					}
+				}),
+			},
+			wantError: field.ErrorList{
+				field.Required(field.NewPath("tag", "status", "snapshot", "durable_snapshot", "object", "snapshot_uri"), ""),
+				field.Invalid(field.NewPath("tag", "status", "snapshot", "fidelity"), nil, "").WithOrigin("maximum"),
+			},
+		},
+		{
+			name: "missing tag.status.snapshot.durable_snapshot",
+			req: &ateapi.CreateTagRequest{
+				Tag: validTag(func(tag *ateapi.Tag) {
+					tag.Status = &ateapi.TagStatus{
+						Snapshot:         validSnapshot(func(snap *ateapi.Snapshot) { snap.DurableSnapshot = nil }),
+						ActorTemplateUid: someActorUID,
+					}
+				}),
+			},
+			wantError: field.ErrorList{field.Required(field.NewPath("tag", "status", "snapshot", "durable_snapshot"), "")},
+		},
+		{
+			name: "missing tag.status.actor_template_uid",
+			req: &ateapi.CreateTagRequest{
+				Tag: validTag(func(tag *ateapi.Tag) {
+					tag.Status = &ateapi.TagStatus{Snapshot: validSnapshot()}
+				}),
+			},
+			wantError: field.ErrorList{field.Required(field.NewPath("tag", "status", "actor_template_uid"), "")},
+		},
+		{
+			name: "invalid tag.status.actor_template_uid",
+			req: &ateapi.CreateTagRequest{
+				Tag: validTag(func(tag *ateapi.Tag) {
+					tag.Status = &ateapi.TagStatus{Snapshot: validSnapshot(), ActorTemplateUid: "not-a-uuid"}
+				}),
+			},
+			wantError: field.ErrorList{field.Invalid(field.NewPath("tag", "status", "actor_template_uid"), nil, "").WithOrigin("format=k8s-uuid")},
+		},
+		{
 			// The tag has to name the atespace it lands in, like every other
 			// create: the source Actor's atespace is checked against it, not
 			// used as a default.
@@ -296,6 +351,17 @@ func TestValidateUpdateTagRequest(t *testing.T) {
 				Tag: validTag(func(tag *ateapi.Tag) {
 					tag.SourceActor = nil
 					tag.Scope = ateapi.TagScope_TAG_SCOPE_UNSPECIFIED
+				}),
+			},
+			wantError: nil,
+		},
+		{
+			// Status is checked as part of the whole tag, against the stored
+			// one.
+			name: "tag.status is not checked against the request",
+			req: &ateapi.UpdateTagRequest{
+				Tag: validTag(func(tag *ateapi.Tag) {
+					tag.Status = &ateapi.TagStatus{Snapshot: badSnapshot()}
 				}),
 			},
 			wantError: nil,
@@ -623,4 +689,20 @@ func TestValidateDeleteTagRequest(t *testing.T) {
 			assertValidateErr(t, ValidateDeleteTagRequest(ctx, tt.req), tt.wantError)
 		})
 	}
+}
+
+func validTag(mutate ...func(*ateapi.Tag)) *ateapi.Tag {
+	tag := &ateapi.Tag{
+		Metadata: validResourceMetadata(),
+		Status: &ateapi.TagStatus{
+			Snapshot:         validSnapshot(func(s *ateapi.Snapshot) { s.Owner = ateapi.SnapshotOwner_SNAPSHOT_OWNER_TAG }),
+			ActorTemplateUid: someActorUID,
+		},
+		Scope:       ateapi.TagScope_TAG_SCOPE_ATESPACE,
+		SourceActor: &ateapi.ObjectRef{Atespace: "as", Name: "nm"},
+	}
+	for _, m := range mutate {
+		m(tag)
+	}
+	return tag
 }
