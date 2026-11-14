@@ -308,82 +308,64 @@ func TestValidateUpdateTagRequest(t *testing.T) {
 	}
 }
 
-// TestValidateTagUpdateResult covers the second half of an update:
+// TestValidateTagUpdate covers the second half of an update:
 // the merged tag the server is about to write, checked against the one it
 // replaces. This is where everything the request could not be held to lands.
-func TestValidateTagUpdateResult(t *testing.T) {
+func TestValidateTagUpdate(t *testing.T) {
 	ctx := context.Background()
 	tagPath := field.NewPath("tag")
-	storedTag := func(opts ...func(*ateapi.Tag)) *ateapi.Tag {
-		tag := &ateapi.Tag{
-			Metadata:    &ateapi.ResourceMetadata{Atespace: "ns1", Name: "tag1", Uid: "2a5f8c1e-9b3d-4f7a-8e6c-1d0b4a7f2e93", Version: 7},
-			Scope:       ateapi.TagScope_TAG_SCOPE_ATESPACE,
-			SourceActor: &ateapi.ObjectRef{Atespace: "ns1", Name: "id1"},
-		}
-		for _, opt := range opts {
-			opt(tag)
-		}
-		return tag
+	pending := func(tag *ateapi.Tag) {
+		tag.Status.Snapshot.DurableSnapshot.State = ateapi.SnapshotStorageState_SNAPSHOT_STORAGE_STATE_PENDING
 	}
-	withSnapshot := func(state ateapi.SnapshotStorageState) func(*ateapi.Tag) {
-		return func(tag *ateapi.Tag) {
-			tag.Status = &ateapi.TagStatus{
-				ActorTemplateUid: "01234567-89ab-cdef-0123-456789abcdef",
-				Snapshot: &ateapi.Snapshot{
-					Uuid:       "8c1f5a2e-3b7d-4e9a-a6c0-2d4f8b1e7a35",
-					Generation: 1,
-					Owner:      ateapi.SnapshotOwner_SNAPSHOT_OWNER_TAG,
-					Fidelity:   ateapi.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY,
-					DurableSnapshot: &ateapi.SnapshotStorage{
-						State:  state,
-						Object: &ateapi.ObjectSnapshot{SnapshotUri: "gs://bucket/atespaces/ns1/tags/tag1"},
-					},
-				},
-			}
-		}
+	completed := func(tag *ateapi.Tag) {
+		tag.Status.Snapshot.DurableSnapshot.State = ateapi.SnapshotStorageState_SNAPSHOT_STORAGE_STATE_COMPLETED
 	}
-	pending := withSnapshot(ateapi.SnapshotStorageState_SNAPSHOT_STORAGE_STATE_PENDING)
-	completed := withSnapshot(ateapi.SnapshotStorageState_SNAPSHOT_STORAGE_STATE_COMPLETED)
 	tests := []struct {
 		name      string
-		oldVal    *ateapi.Tag // nil means storedTag()
+		oldVal    *ateapi.Tag
 		newVal    *ateapi.Tag
 		wantError field.ErrorList
 	}{
 		{
 			name:      "unchanged",
-			newVal:    storedTag(),
+			oldVal:    validTag(),
+			newVal:    validTag(),
 			wantError: nil,
 		},
 		{
-			name: "publishing is allowed",
-			newVal: storedTag(func(tag *ateapi.Tag) {
+			name:   "publishing is allowed",
+			oldVal: validTag(),
+			newVal: validTag(func(tag *ateapi.Tag) {
 				tag.Scope = ateapi.TagScope_TAG_SCOPE_PUBLISHED
 			}),
 			wantError: nil,
 		},
 		{
-			name: "unset tag.scope",
-			newVal: storedTag(func(tag *ateapi.Tag) {
+			name:   "unset tag.scope",
+			oldVal: validTag(),
+			newVal: validTag(func(tag *ateapi.Tag) {
 				tag.Scope = ateapi.TagScope_TAG_SCOPE_UNSPECIFIED
 			}),
 			wantError: field.ErrorList{field.Required(tagPath.Child("scope"), "")},
 		},
 		{
 			name:      "tag.scope above the enum",
-			newVal:    storedTag(func(tag *ateapi.Tag) { tag.Scope = ateapi.TagScope(7) }),
+			oldVal:    validTag(),
+			newVal:    validTag(func(tag *ateapi.Tag) { tag.Scope = ateapi.TagScope(7) }),
 			wantError: field.ErrorList{field.Invalid(tagPath.Child("scope"), nil, "").WithOrigin("maximum")},
 		},
 		{
 			name:      "negative tag.scope",
-			newVal:    storedTag(func(tag *ateapi.Tag) { tag.Scope = ateapi.TagScope(-1) }),
+			oldVal:    validTag(),
+			newVal:    validTag(func(tag *ateapi.Tag) { tag.Scope = ateapi.TagScope(-1) }),
 			wantError: field.ErrorList{field.Invalid(tagPath.Child("scope"), nil, "").WithOrigin("minimum")},
 		},
 		{
 			// A tag never moves between snapshots, so it never moves between
 			// sources either.
-			name: "repointed tag.source_actor",
-			newVal: storedTag(func(tag *ateapi.Tag) {
+			name:   "repointed tag.source_actor",
+			oldVal: validTag(),
+			newVal: validTag(func(tag *ateapi.Tag) {
 				tag.SourceActor = &ateapi.ObjectRef{Atespace: "ns1", Name: "id2"}
 			}),
 			wantError: field.ErrorList{field.Invalid(tagPath.Child("source_actor"), nil, "").WithOrigin("immutable")},
@@ -392,7 +374,8 @@ func TestValidateTagUpdateResult(t *testing.T) {
 			// An update is a whole-object replace, so a client that drops the
 			// source it read back would clear it.
 			name:   "missing tag.source_actor",
-			newVal: storedTag(func(tag *ateapi.Tag) { tag.SourceActor = nil }),
+			oldVal: validTag(),
+			newVal: validTag(func(tag *ateapi.Tag) { tag.SourceActor = nil }),
 			wantError: field.ErrorList{
 				field.Invalid(tagPath.Child("source_actor"), nil, "").WithOrigin("immutable"),
 				field.Required(tagPath.Child("source_actor"), ""),
@@ -402,17 +385,20 @@ func TestValidateTagUpdateResult(t *testing.T) {
 			// The tag is addressed through its atespace and name; moving it
 			// would strand every reference to it.
 			name:      "renamed tag",
-			newVal:    storedTag(func(tag *ateapi.Tag) { tag.Metadata.Name = "tag2" }),
+			oldVal:    validTag(),
+			newVal:    validTag(func(tag *ateapi.Tag) { tag.Metadata.Name = "tag2" }),
 			wantError: field.ErrorList{field.Invalid(tagPath.Child("metadata", "name"), nil, "").WithOrigin("immutable")},
 		},
 		{
 			name:      "tag moved to another atespace",
-			newVal:    storedTag(func(tag *ateapi.Tag) { tag.Metadata.Atespace = "ns2" }),
+			oldVal:    validTag(),
+			newVal:    validTag(func(tag *ateapi.Tag) { tag.Metadata.Atespace = "ns2" }),
 			wantError: field.ErrorList{field.Invalid(tagPath.Child("metadata", "atespace"), nil, "").WithOrigin("immutable")},
 		},
 		{
 			name:   "cleared tag.metadata.atespace",
-			newVal: storedTag(func(tag *ateapi.Tag) { tag.Metadata.Atespace = "" }),
+			oldVal: validTag(),
+			newVal: validTag(func(tag *ateapi.Tag) { tag.Metadata.Atespace = "" }),
 			wantError: field.ErrorList{
 				field.Required(tagPath.Child("metadata", "atespace"), ""),
 				field.Invalid(tagPath.Child("metadata", "atespace"), nil, "").WithOrigin("immutable"),
@@ -420,33 +406,32 @@ func TestValidateTagUpdateResult(t *testing.T) {
 		},
 		{
 			name:      "missing tag.metadata",
-			newVal:    storedTag(func(tag *ateapi.Tag) { tag.Metadata = nil }),
+			oldVal:    validTag(),
+			newVal:    validTag(func(tag *ateapi.Tag) { tag.Metadata = nil }),
 			wantError: field.ErrorList{field.Required(tagPath.Child("metadata"), "")},
 		},
 		{
-			name: "tag.status.snapshot recorded",
-			oldVal: storedTag(func(tag *ateapi.Tag) {
-				tag.Status = &ateapi.TagStatus{ActorTemplateUid: "01234567-89ab-cdef-0123-456789abcdef"}
-			}),
-			newVal: storedTag(pending),
+			name:   "tag.status.snapshot recorded",
+			oldVal: validTag(func(tag *ateapi.Tag) { tag.Status.Snapshot = nil }),
+			newVal: validTag(pending),
 		},
 		{
 			name:   "tag.status.snapshot completed",
-			oldVal: storedTag(pending),
-			newVal: storedTag(completed),
+			oldVal: validTag(pending),
+			newVal: validTag(completed),
 		},
 		{
 			name:   "tag.status.snapshot moved back to pending",
-			oldVal: storedTag(completed),
-			newVal: storedTag(pending),
+			oldVal: validTag(completed),
+			newVal: validTag(pending),
 			wantError: field.ErrorList{
 				field.Forbidden(tagPath.Child("status", "snapshot"), ""),
 			},
 		},
 		{
 			name:   "tag.status.snapshot repointed while completing",
-			oldVal: storedTag(pending),
-			newVal: storedTag(completed, func(tag *ateapi.Tag) {
+			oldVal: validTag(pending),
+			newVal: validTag(completed, func(tag *ateapi.Tag) {
 				tag.Status.Snapshot.DurableSnapshot.Object.SnapshotUri = "gs://bucket/elsewhere"
 			}),
 			wantError: field.ErrorList{
@@ -455,8 +440,8 @@ func TestValidateTagUpdateResult(t *testing.T) {
 		},
 		{
 			name:   "tag.status.snapshot repointed",
-			oldVal: storedTag(completed),
-			newVal: storedTag(completed, func(tag *ateapi.Tag) {
+			oldVal: validTag(completed),
+			newVal: validTag(completed, func(tag *ateapi.Tag) {
 				tag.Status.Snapshot.DurableSnapshot.Object.SnapshotUri = "gs://bucket/elsewhere"
 			}),
 			wantError: field.ErrorList{
@@ -465,24 +450,24 @@ func TestValidateTagUpdateResult(t *testing.T) {
 		},
 		{
 			name:   "tag.status.snapshot cleared",
-			oldVal: storedTag(completed),
-			newVal: storedTag(completed, func(tag *ateapi.Tag) { tag.Status.Snapshot = nil }),
+			oldVal: validTag(completed),
+			newVal: validTag(func(tag *ateapi.Tag) { tag.Status.Snapshot = nil }),
 			wantError: field.ErrorList{
 				field.Invalid(tagPath.Child("status", "snapshot"), nil, "").WithOrigin("update"),
 			},
 		},
 		{
 			name:   "tag.status cleared",
-			oldVal: storedTag(completed),
-			newVal: storedTag(),
+			oldVal: validTag(),
+			newVal: validTag(func(tag *ateapi.Tag) { tag.Status = nil }),
 			wantError: field.ErrorList{
 				field.Invalid(tagPath.Child("status"), nil, "").WithOrigin("update"),
 			},
 		},
 		{
 			name:   "tag.status.actor_template_uid changed",
-			oldVal: storedTag(completed),
-			newVal: storedTag(completed, func(tag *ateapi.Tag) {
+			oldVal: validTag(),
+			newVal: validTag(func(tag *ateapi.Tag) {
 				tag.Status.ActorTemplateUid = "fedcba98-7654-3210-fedc-ba9876543210"
 			}),
 			wantError: field.ErrorList{
@@ -493,9 +478,6 @@ func TestValidateTagUpdateResult(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			oldVal := tt.oldVal
-			if oldVal == nil {
-				oldVal = storedTag()
-			}
 			assertValidateErr(t, ValidateTagUpdate(ctx, tagPath, tt.newVal, oldVal), tt.wantError)
 		})
 	}
