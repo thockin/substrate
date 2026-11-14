@@ -63,7 +63,9 @@ func TestValidateCreateAtespaceRequest(t *testing.T) {
 	}, {
 		"invalid metadata.name",
 		validReq(validAtespace(withMetadata(func(m *ateapi.ResourceMetadata) { m.Name = "invalid value" }))),
-		field.ErrorList{field.Invalid(field.NewPath("atespace", "metadata", "name"), nil, "").WithOrigin("format=k8s-short-name")},
+		field.ErrorList{
+			field.Invalid(field.NewPath("atespace", "metadata", "name"), nil, "").WithOrigin("format=k8s-short-name"),
+		},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -153,7 +155,9 @@ func TestValidateListAtespacesRequest(t *testing.T) {
 		validReq(func(r *ateapi.ListAtespacesRequest) {
 			r.Options = &ateapi.ListOptions{PageToken: strings.Repeat("x", 257)}
 		}),
-		field.ErrorList{field.TooLongCharacters(field.NewPath("options", "page_token"), "", 256).WithOrigin("maxLength")},
+		field.ErrorList{
+			field.TooLongCharacters(field.NewPath("options", "page_token"), "", 256).WithOrigin("maxLength"),
+		},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
