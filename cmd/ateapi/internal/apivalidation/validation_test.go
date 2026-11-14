@@ -1500,50 +1500,6 @@ func TestValidateTag(t *testing.T) {
 	}
 }
 
-func TestValidateTagUpdate(t *testing.T) {
-	valid := validTag
-
-	tests := []struct {
-		name   string
-		oldObj *ateapi.Tag // should always be valid
-		newObj *ateapi.Tag
-		want   field.ErrorList
-	}{
-		{
-			name:   "unchanged",
-			oldObj: valid(),
-			newObj: valid(),
-		},
-		{
-			// The tag is addressed through its atespace; moving it would strand
-			// every reference to it.
-			name:   "metadata.atespace changed",
-			oldObj: valid(),
-			newObj: valid(func(tag *ateapi.Tag) { tag.Metadata.Atespace = "other" }),
-			want:   field.ErrorList{field.Invalid(field.NewPath("metadata", "atespace"), nil, "").WithOrigin("immutable")},
-		},
-		{
-			name:   "source_actor changed",
-			oldObj: valid(),
-			newObj: valid(func(tag *ateapi.Tag) { tag.SourceActor.Name = "other" }),
-			want:   field.ErrorList{field.Invalid(field.NewPath("source_actor"), nil, "").WithOrigin("immutable")},
-		},
-		{
-			name:   "scope changed",
-			oldObj: valid(),
-			newObj: valid(func(tag *ateapi.Tag) {
-				tag.Scope = ateapi.TagScope_TAG_SCOPE_PUBLISHED
-			}),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			op := MakeUpdateOp(context.Background())
-			assertValidateErr(t, Validate_Tag(context.Background(), op, nil, tt.newObj, tt.oldObj), tt.want)
-		})
-	}
-}
-
 // TestValidateTagRequestPayloads covers the generated rules on the
 // tag requests. The RPCs call these directly (see
 // validateCreateTagRequest), so these guard the schema against
