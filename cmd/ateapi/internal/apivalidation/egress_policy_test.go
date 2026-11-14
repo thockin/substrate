@@ -737,7 +737,9 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 	}, {
 		name: "same pattern on different ports",
 		mutate: func(p *ateapi.EgressPolicy) {
-			p.Rules = append(p.Rules, &ateapi.EgressRule{Http: &ateapi.HttpRule{Hostnames: []string{"api.example.com"}, Ports: portNumbers(8080)}})
+			p.Rules = append(p.Rules, &ateapi.EgressRule{
+				Http: &ateapi.HttpRule{Hostnames: []string{"api.example.com"}, Ports: portNumbers(8080)},
+			})
 		},
 	}, {
 		name: "same pattern on the default port ties",
@@ -780,7 +782,11 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 	}, {
 		name: "https and tls passthrough on the same port tie",
 		mutate: func(p *ateapi.EgressPolicy) {
-			p.Rules = append(p.Rules, httpsRule(nil, "*.example.com"), passthroughRule(portNumbers(443), "*.example.com"))
+			p.Rules = append(
+				p.Rules,
+				httpsRule(nil, "*.example.com"),
+				passthroughRule(portNumbers(443), "*.example.com"),
+			)
 		},
 		want: field.ErrorList{
 			field.Invalid(rules.Index(2).Child("tls_passthrough", "hostnames").Index(0), "*.example.com", `ties with egress_policy.rules[1].https.hostnames[0] on port 443`),
@@ -806,7 +812,10 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		mutate: func(p *ateapi.EgressPolicy) {
 			p.Rules[0].Http.Effects.ReplaceHeaders = append(
 				p.Rules[0].Http.Effects.ReplaceHeaders,
-				&ateapi.CredentialHeader{Header: "authorization", CredentialUri: "ate-secret://example.com/provider/secret"},
+				&ateapi.CredentialHeader{
+					Header:        "authorization",
+					CredentialUri: "ate-secret://example.com/provider/secret",
+				},
 			)
 		},
 		want: field.ErrorList{
@@ -878,10 +887,14 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 	}, {
 		name: "actor JWT on an https rule",
 		mutate: func(p *ateapi.EgressPolicy) {
-			p.Rules[0] = &ateapi.EgressRule{Https: &ateapi.HttpsRule{
-				Hostnames: []string{"api.example.com"},
-				Effects:   &ateapi.HttpRuleEffects{ReplaceHeaders: []*ateapi.CredentialHeader{actorJWTHeader("https://api.example.com")}},
-			}}
+			p.Rules[0] = &ateapi.EgressRule{
+				Https: &ateapi.HttpsRule{
+					Hostnames: []string{"api.example.com"},
+					Effects: &ateapi.HttpRuleEffects{
+						ReplaceHeaders: []*ateapi.CredentialHeader{actorJWTHeader("https://api.example.com")},
+					},
+				},
+			}
 		},
 	}, {
 		name: "actor JWT next to a credential URI",
@@ -893,7 +906,10 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 	}, {
 		name: "credential URI and actor JWT in one header",
 		mutate: func(p *ateapi.EgressPolicy) {
-			p.Rules[0].Http.Effects.ReplaceHeaders[0].ActorJwt = &ateapi.ActorJwtSource{Audiences: []string{"https://api.example.com"}, ExpirationSeconds: 900}
+			p.Rules[0].Http.Effects.ReplaceHeaders[0].ActorJwt = &ateapi.ActorJwtSource{
+				Audiences:         []string{"https://api.example.com"},
+				ExpirationSeconds: 900,
+			}
 		},
 		want: field.ErrorList{
 			field.Invalid(staticHeader, nil, "one of").WithOrigin("union"),
@@ -988,7 +1004,9 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 	}, {
 		name: "effects on an https rule",
 		mutate: func(p *ateapi.EgressPolicy) {
-			p.Rules[0] = &ateapi.EgressRule{Https: &ateapi.HttpsRule{Hostnames: []string{"api.example.com"}, Effects: &ateapi.HttpRuleEffects{}}}
+			p.Rules[0] = &ateapi.EgressRule{
+				Https: &ateapi.HttpsRule{Hostnames: []string{"api.example.com"}, Effects: &ateapi.HttpRuleEffects{}},
+			}
 		},
 		want: field.ErrorList{
 			field.Required(rule.Child("https", "effects"), "at least one effect must be specified"),

@@ -64,103 +64,135 @@ func TestValidateCreateGlobalAccessPolicyRequest(t *testing.T) {
 		req:  &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy()},
 	}, {
 		name: "valid without bindings",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings = nil
-		})},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings = nil
+			}),
+		},
 	}, {
 		name:      "missing access_policy",
 		req:       &ateapi.CreateGlobalAccessPolicyRequest{},
 		wantError: field.ErrorList{field.Required(accessPolicyPath, "")},
 	}, {
 		name: "missing metadata",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Metadata = nil
-		})},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Metadata = nil
+			}),
+		},
 		wantError: field.ErrorList{field.Required(accessPolicyPath.Child("metadata"), "")},
 	}, {
 		// A nil entry is rejected as a whole; validateBindings skips it.
 		name: "nil binding",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings = append(p.Bindings, nil)
-		})},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings = append(p.Bindings, nil)
+			}),
+		},
 		wantError: field.ErrorList{field.Required(policyBindings.Index(2), "")},
 	}, {
 		name: "atespace set",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Metadata.Atespace = "team-a"
-		})},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Metadata.Atespace = "team-a"
+			}),
+		},
 		wantError: field.ErrorList{field.Forbidden(accessPolicyPath.Child("metadata", "atespace"), "")},
 	}, {
 		name: "missing name",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Metadata.Name = ""
-		})},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Metadata.Name = ""
+			}),
+		},
 		wantError: field.ErrorList{field.Required(accessPolicyPath.Child("metadata", "name"), "")},
 	}, {
 		name: "name not default",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Metadata.Name = "other"
-		})},
-		wantError: field.ErrorList{field.Invalid(accessPolicyPath.Child("metadata", "name"), nil, "").WithOrigin("custom=default")},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Metadata.Name = "other"
+			}),
+		},
+		wantError: field.ErrorList{
+			field.Invalid(accessPolicyPath.Child("metadata", "name"), nil, "").WithOrigin("custom=default"),
+		},
 	}, {
 		// editor is an atespace-only role.
 		name: "editor role",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings[0].Role = authz.RoleEditor
-		})},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings[0].Role = authz.RoleEditor
+			}),
+		},
 		wantError: field.ErrorList{field.NotSupported[string](policyBindings.Index(0).Child("role"), "", nil)},
 	}, {
 		name: "unknown role",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings[1].Role = "admin"
-		})},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings[1].Role = "admin"
+			}),
+		},
 		wantError: field.ErrorList{field.NotSupported[string](policyBindings.Index(1).Child("role"), "", nil)},
 	}, {
 		// System component roles are granted only by ateapi's configuration.
 		name: "system component role",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings[1].Role = authz.RoleIngressRouter
-		})},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings[1].Role = authz.RoleIngressRouter
+			}),
+		},
 		wantError: field.ErrorList{field.NotSupported[string](policyBindings.Index(1).Child("role"), "", nil)},
 	}, {
 		name: "duplicate role",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings[1].Role = authz.RoleOwner
-		})},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings[1].Role = authz.RoleOwner
+			}),
+		},
 		wantError: field.ErrorList{field.Duplicate(policyBindings.Index(1).Child("role"), nil)},
 	}, {
 		name: "member without user prefix",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings[0].Members = []string{"alice@example.com"}
-		})},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings[0].Members = []string{"alice@example.com"}
+			}),
+		},
 		wantError: field.ErrorList{field.Invalid(policyBindings.Index(0).Child("members").Index(0), nil, "")},
 	}, {
 		name: "member with a control character",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings[0].Members = []string{"user:alice\tbob"}
-		})},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings[0].Members = []string{"user:alice\tbob"}
+			}),
+		},
 		wantError: field.ErrorList{field.Invalid(policyBindings.Index(0).Child("members").Index(0), nil, "")},
 	}, {
 		name: "wildcard member",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings[1].Members = []string{"user:*"}
-		})},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings[1].Members = []string{"user:*"}
+			}),
+		},
 		wantError: field.ErrorList{field.Invalid(policyBindings.Index(1).Child("members").Index(0), nil, "")},
 	}, {
 		name: "members at the policy limit",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings = []*ateapi.Binding{{Role: authz.RoleViewer, Members: membersOfSize(maxMembersPerPolicy)}}
-		})},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings = []*ateapi.Binding{{Role: authz.RoleViewer, Members: membersOfSize(maxMembersPerPolicy)}}
+			}),
+		},
 	}, {
 		// Each binding is within its own limit; together they exceed the
 		// policy's.
 		name: "members over the policy limit across bindings",
-		req: &ateapi.CreateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings = []*ateapi.Binding{
-				{Role: authz.RoleOwner, Members: membersOfSize(1)},
-				{Role: authz.RoleViewer, Members: membersOfSize(maxMembersPerPolicy)},
-			}
-		})},
+		req: &ateapi.CreateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings = []*ateapi.Binding{
+					{Role: authz.RoleOwner, Members: membersOfSize(1)},
+					{Role: authz.RoleViewer, Members: membersOfSize(maxMembersPerPolicy)},
+				}
+			}),
+		},
 		wantError: field.ErrorList{field.TooMany(policyBindings, 0, 0)},
 	}}
 	for _, tt := range tests {
@@ -210,9 +242,11 @@ func TestValidateUpdateGlobalAccessPolicyRequest(t *testing.T) {
 		wantError: field.ErrorList{field.Required(accessPolicyPath, "")},
 	}, {
 		name: "editor role",
-		req: &ateapi.UpdateGlobalAccessPolicyRequest{AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings[0].Role = authz.RoleEditor
-		})},
+		req: &ateapi.UpdateGlobalAccessPolicyRequest{
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings[0].Role = authz.RoleEditor
+			}),
+		},
 		wantError: field.ErrorList{field.NotSupported[string](policyBindings.Index(0).Child("role"), "", nil)},
 	}}
 	for _, tt := range tests {
@@ -246,7 +280,11 @@ func TestValidateGlobalAccessPolicyUpdate(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assertValidateErr(t, ValidateGlobalAccessPolicyUpdate(ctx, accessPolicyPath, tt.newVal, validAccessPolicy()), tt.wantError)
+			assertValidateErr(
+				t,
+				ValidateGlobalAccessPolicyUpdate(ctx, accessPolicyPath, tt.newVal, validAccessPolicy()),
+				tt.wantError,
+			)
 		})
 	}
 }
@@ -263,9 +301,12 @@ func TestValidateCreateAtespaceAccessPolicyRequest(t *testing.T) {
 		req:  &ateapi.CreateAtespaceAccessPolicyRequest{Atespace: atespace, AccessPolicy: validAccessPolicy()},
 	}, {
 		name: "valid with editor role",
-		req: &ateapi.CreateAtespaceAccessPolicyRequest{Atespace: atespace, AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings[1].Role = authz.RoleEditor
-		})},
+		req: &ateapi.CreateAtespaceAccessPolicyRequest{
+			Atespace: atespace,
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings[1].Role = authz.RoleEditor
+			}),
+		},
 	}, {
 		name:      "missing atespace",
 		req:       &ateapi.CreateAtespaceAccessPolicyRequest{AccessPolicy: validAccessPolicy()},
@@ -276,33 +317,50 @@ func TestValidateCreateAtespaceAccessPolicyRequest(t *testing.T) {
 		wantError: field.ErrorList{field.Required(accessPolicyPath, "")},
 	}, {
 		name: "missing name",
-		req: &ateapi.CreateAtespaceAccessPolicyRequest{Atespace: atespace, AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Metadata.Name = ""
-		})},
+		req: &ateapi.CreateAtespaceAccessPolicyRequest{
+			Atespace: atespace,
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Metadata.Name = ""
+			}),
+		},
 		wantError: field.ErrorList{field.Required(accessPolicyPath.Child("metadata", "name"), "")},
 	}, {
 		name: "name not default",
-		req: &ateapi.CreateAtespaceAccessPolicyRequest{Atespace: atespace, AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Metadata.Name = "other"
-		})},
-		wantError: field.ErrorList{field.Invalid(accessPolicyPath.Child("metadata", "name"), nil, "").WithOrigin("custom=default")},
+		req: &ateapi.CreateAtespaceAccessPolicyRequest{
+			Atespace: atespace,
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Metadata.Name = "other"
+			}),
+		},
+		wantError: field.ErrorList{
+			field.Invalid(accessPolicyPath.Child("metadata", "name"), nil, "").WithOrigin("custom=default"),
+		},
 	}, {
 		name: "unknown role",
-		req: &ateapi.CreateAtespaceAccessPolicyRequest{Atespace: atespace, AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings[0].Role = "admin"
-		})},
+		req: &ateapi.CreateAtespaceAccessPolicyRequest{
+			Atespace: atespace,
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings[0].Role = "admin"
+			}),
+		},
 		wantError: field.ErrorList{field.NotSupported[string](policyBindings.Index(0).Child("role"), "", nil)},
 	}, {
 		name: "system component role",
-		req: &ateapi.CreateAtespaceAccessPolicyRequest{Atespace: atespace, AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings[0].Role = authz.RoleEgressGateway
-		})},
+		req: &ateapi.CreateAtespaceAccessPolicyRequest{
+			Atespace: atespace,
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings[0].Role = authz.RoleEgressGateway
+			}),
+		},
 		wantError: field.ErrorList{field.NotSupported[string](policyBindings.Index(0).Child("role"), "", nil)},
 	}, {
 		name: "invalid member",
-		req: &ateapi.CreateAtespaceAccessPolicyRequest{Atespace: atespace, AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings[0].Members = []string{"group:eng"}
-		})},
+		req: &ateapi.CreateAtespaceAccessPolicyRequest{
+			Atespace: atespace,
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings[0].Members = []string{"group:eng"}
+			}),
+		},
 		wantError: field.ErrorList{field.Invalid(policyBindings.Index(0).Child("members").Index(0), nil, "")},
 	}}
 	for _, tt := range tests {
@@ -320,7 +378,10 @@ func TestValidateGetAtespaceAccessPolicyRequest(t *testing.T) {
 		wantError field.ErrorList
 	}{{
 		name: "valid",
-		req:  &ateapi.GetAtespaceAccessPolicyRequest{Atespace: &ateapi.ObjectRef{Name: "team-a"}, Name: resources.SingletonName},
+		req: &ateapi.GetAtespaceAccessPolicyRequest{
+			Atespace: &ateapi.ObjectRef{Name: "team-a"},
+			Name:     resources.SingletonName,
+		},
 	}, {
 		name:      "missing atespace",
 		req:       &ateapi.GetAtespaceAccessPolicyRequest{Name: resources.SingletonName},
@@ -357,9 +418,12 @@ func TestValidateUpdateAtespaceAccessPolicyRequest(t *testing.T) {
 		wantError: field.ErrorList{field.Required(accessPolicyPath, "")},
 	}, {
 		name: "duplicate role",
-		req: &ateapi.UpdateAtespaceAccessPolicyRequest{Atespace: atespace, AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
-			p.Bindings[1].Role = authz.RoleOwner
-		})},
+		req: &ateapi.UpdateAtespaceAccessPolicyRequest{
+			Atespace: atespace,
+			AccessPolicy: validAccessPolicy(func(p *ateapi.AccessPolicy) {
+				p.Bindings[1].Role = authz.RoleOwner
+			}),
+		},
 		wantError: field.ErrorList{field.Duplicate(policyBindings.Index(1).Child("role"), nil)},
 	}}
 	for _, tt := range tests {
@@ -389,7 +453,11 @@ func TestValidateAtespaceAccessPolicyUpdate(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assertValidateErr(t, ValidateAtespaceAccessPolicyUpdate(ctx, accessPolicyPath, tt.newVal, validAccessPolicy()), tt.wantError)
+			assertValidateErr(
+				t,
+				ValidateAtespaceAccessPolicyUpdate(ctx, accessPolicyPath, tt.newVal, validAccessPolicy()),
+				tt.wantError,
+			)
 		})
 	}
 }
@@ -402,7 +470,10 @@ func TestValidateDeleteAtespaceAccessPolicyRequest(t *testing.T) {
 		wantError field.ErrorList
 	}{{
 		name: "valid",
-		req:  &ateapi.DeleteAtespaceAccessPolicyRequest{Atespace: &ateapi.ObjectRef{Name: "team-a"}, Name: resources.SingletonName},
+		req: &ateapi.DeleteAtespaceAccessPolicyRequest{
+			Atespace: &ateapi.ObjectRef{Name: "team-a"},
+			Name:     resources.SingletonName,
+		},
 	}, {
 		name:      "missing atespace",
 		req:       &ateapi.DeleteAtespaceAccessPolicyRequest{Name: resources.SingletonName},
@@ -412,8 +483,11 @@ func TestValidateDeleteAtespaceAccessPolicyRequest(t *testing.T) {
 		req:       &ateapi.DeleteAtespaceAccessPolicyRequest{Atespace: &ateapi.ObjectRef{Name: "team-a"}},
 		wantError: field.ErrorList{field.Required(field.NewPath("name"), "")},
 	}, {
-		name:      "wrong name",
-		req:       &ateapi.DeleteAtespaceAccessPolicyRequest{Atespace: &ateapi.ObjectRef{Name: "team-a"}, Name: "other"},
+		name: "wrong name",
+		req: &ateapi.DeleteAtespaceAccessPolicyRequest{
+			Atespace: &ateapi.ObjectRef{Name: "team-a"},
+			Name:     "other",
+		},
 		wantError: field.ErrorList{field.Invalid(field.NewPath("name"), nil, "").WithOrigin("custom=default")},
 	}}
 	for _, tt := range tests {

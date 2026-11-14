@@ -96,7 +96,9 @@ func TestValidateCreateTagRequest(t *testing.T) {
 					}
 				}),
 			},
-			wantError: field.ErrorList{field.Required(field.NewPath("tag", "status", "snapshot", "durable_snapshot"), "")},
+			wantError: field.ErrorList{
+				field.Required(field.NewPath("tag", "status", "snapshot", "durable_snapshot"), ""),
+			},
 		},
 		{
 			name: "missing tag.status.actor_template_uid",
@@ -114,7 +116,9 @@ func TestValidateCreateTagRequest(t *testing.T) {
 					tag.Status = &ateapi.TagStatus{Snapshot: validSnapshot(), ActorTemplateUid: "not-a-uuid"}
 				}),
 			},
-			wantError: field.ErrorList{field.Invalid(field.NewPath("tag", "status", "actor_template_uid"), nil, "").WithOrigin("format=k8s-uuid")},
+			wantError: field.ErrorList{
+				field.Invalid(field.NewPath("tag", "status", "actor_template_uid"), nil, "").WithOrigin("format=k8s-uuid"),
+			},
 		},
 		{
 			// The tag has to name the atespace it lands in, like every other
@@ -178,7 +182,9 @@ func TestValidateCreateTagRequest(t *testing.T) {
 			req: &ateapi.CreateTagRequest{
 				Tag: validTag(func(tag *ateapi.Tag) { tag.SourceActor.Name = "ID1" }),
 			},
-			wantError: field.ErrorList{field.Invalid(field.NewPath("tag", "source_actor", "name"), nil, "").WithOrigin("format=k8s-short-name")},
+			wantError: field.ErrorList{
+				field.Invalid(field.NewPath("tag", "source_actor", "name"), nil, "").WithOrigin("format=k8s-short-name"),
+			},
 		},
 		{
 			name:      "missing tag",
@@ -204,7 +210,9 @@ func TestValidateCreateTagRequest(t *testing.T) {
 			req: &ateapi.CreateTagRequest{
 				Tag: validTag(func(tag *ateapi.Tag) { tag.Metadata.Name = "TAG1" }),
 			},
-			wantError: field.ErrorList{field.Invalid(field.NewPath("tag", "metadata", "name"), nil, "").WithOrigin("format=k8s-short-name")},
+			wantError: field.ErrorList{
+				field.Invalid(field.NewPath("tag", "metadata", "name"), nil, "").WithOrigin("format=k8s-short-name"),
+			},
 		},
 		{
 			// A tag somewhere else than its source Actor could not be resolved
@@ -295,7 +303,9 @@ func TestValidateUpdateTagRequest(t *testing.T) {
 			req: &ateapi.UpdateTagRequest{
 				Tag: validTag(func(tag *ateapi.Tag) { tag.Metadata.Atespace = "NS1" }),
 			},
-			wantError: field.ErrorList{field.Invalid(field.NewPath("tag", "metadata", "atespace"), nil, "").WithOrigin("format=k8s-short-name")},
+			wantError: field.ErrorList{
+				field.Invalid(field.NewPath("tag", "metadata", "atespace"), nil, "").WithOrigin("format=k8s-short-name"),
+			},
 		},
 		{
 			name: "missing tag.metadata.name",
@@ -309,7 +319,9 @@ func TestValidateUpdateTagRequest(t *testing.T) {
 			req: &ateapi.UpdateTagRequest{
 				Tag: validTag(func(tag *ateapi.Tag) { tag.Metadata.Name = "TAG1" }),
 			},
-			wantError: field.ErrorList{field.Invalid(field.NewPath("tag", "metadata", "name"), nil, "").WithOrigin("format=k8s-short-name")},
+			wantError: field.ErrorList{
+				field.Invalid(field.NewPath("tag", "metadata", "name"), nil, "").WithOrigin("format=k8s-short-name"),
+			},
 		},
 		{
 			// The preconditions are the store's to insist on, not the schema's:
@@ -326,7 +338,9 @@ func TestValidateUpdateTagRequest(t *testing.T) {
 			req: &ateapi.UpdateTagRequest{
 				Tag: validTag(func(tag *ateapi.Tag) { tag.Metadata.Uid = "not-a-uuid" }),
 			},
-			wantError: field.ErrorList{field.Invalid(field.NewPath("tag", "metadata", "uid"), nil, "").WithOrigin("format=k8s-uuid")},
+			wantError: field.ErrorList{
+				field.Invalid(field.NewPath("tag", "metadata", "uid"), nil, "").WithOrigin("format=k8s-uuid"),
+			},
 		},
 		{
 			name: "missing tag.metadata.version precondition",
@@ -340,7 +354,9 @@ func TestValidateUpdateTagRequest(t *testing.T) {
 			req: &ateapi.UpdateTagRequest{
 				Tag: validTag(func(tag *ateapi.Tag) { tag.Metadata.Version = -1 }),
 			},
-			wantError: field.ErrorList{field.Invalid(field.NewPath("tag", "metadata", "version"), nil, "").WithOrigin("minimum")},
+			wantError: field.ErrorList{
+				field.Invalid(field.NewPath("tag", "metadata", "version"), nil, "").WithOrigin("minimum"),
+			},
 		},
 		{
 			// Nothing about the tag body is held against the request: it is
@@ -450,16 +466,20 @@ func TestValidateTagUpdate(t *testing.T) {
 		{
 			// The tag is addressed through its atespace and name; moving it
 			// would strand every reference to it.
-			name:      "renamed tag",
-			oldVal:    validTag(),
-			newVal:    validTag(func(tag *ateapi.Tag) { tag.Metadata.Name = "tag2" }),
-			wantError: field.ErrorList{field.Invalid(tagPath.Child("metadata", "name"), nil, "").WithOrigin("immutable")},
+			name:   "renamed tag",
+			oldVal: validTag(),
+			newVal: validTag(func(tag *ateapi.Tag) { tag.Metadata.Name = "tag2" }),
+			wantError: field.ErrorList{
+				field.Invalid(tagPath.Child("metadata", "name"), nil, "").WithOrigin("immutable"),
+			},
 		},
 		{
-			name:      "tag moved to another atespace",
-			oldVal:    validTag(),
-			newVal:    validTag(func(tag *ateapi.Tag) { tag.Metadata.Atespace = "ns2" }),
-			wantError: field.ErrorList{field.Invalid(tagPath.Child("metadata", "atespace"), nil, "").WithOrigin("immutable")},
+			name:   "tag moved to another atespace",
+			oldVal: validTag(),
+			newVal: validTag(func(tag *ateapi.Tag) { tag.Metadata.Atespace = "ns2" }),
+			wantError: field.ErrorList{
+				field.Invalid(tagPath.Child("metadata", "atespace"), nil, "").WithOrigin("immutable"),
+			},
 		},
 		{
 			name:   "cleared tag.metadata.atespace",
@@ -569,9 +589,11 @@ func TestValidateListTagsRequest(t *testing.T) {
 			wantError: nil,
 		},
 		{
-			name:      "invalid atespace",
-			req:       &ateapi.ListTagsRequest{Atespace: "NS1"},
-			wantError: field.ErrorList{field.Invalid(field.NewPath("atespace"), nil, "").WithOrigin("format=k8s-short-name")},
+			name: "invalid atespace",
+			req:  &ateapi.ListTagsRequest{Atespace: "NS1"},
+			wantError: field.ErrorList{
+				field.Invalid(field.NewPath("atespace"), nil, "").WithOrigin("format=k8s-short-name"),
+			},
 		},
 		{
 			name:      "valid, positive page_size",
@@ -579,19 +601,29 @@ func TestValidateListTagsRequest(t *testing.T) {
 			wantError: nil,
 		},
 		{
-			name:      "negative page_size",
-			req:       &ateapi.ListTagsRequest{Atespace: "ns1", Options: &ateapi.ListOptions{PageSize: -1}},
-			wantError: field.ErrorList{field.Invalid(field.NewPath("options", "page_size"), nil, "").WithOrigin("minimum")},
+			name: "negative page_size",
+			req:  &ateapi.ListTagsRequest{Atespace: "ns1", Options: &ateapi.ListOptions{PageSize: -1}},
+			wantError: field.ErrorList{
+				field.Invalid(field.NewPath("options", "page_size"), nil, "").WithOrigin("minimum"),
+			},
 		},
 		{
-			name:      "valid page_token",
-			req:       &ateapi.ListTagsRequest{Atespace: "ns1", Options: &ateapi.ListOptions{PageToken: strings.Repeat("x", 256)}},
+			name: "valid page_token",
+			req: &ateapi.ListTagsRequest{
+				Atespace: "ns1",
+				Options:  &ateapi.ListOptions{PageToken: strings.Repeat("x", 256)},
+			},
 			wantError: nil,
 		},
 		{
-			name:      "too-large page_token",
-			req:       &ateapi.ListTagsRequest{Atespace: "ns1", Options: &ateapi.ListOptions{PageToken: strings.Repeat("x", 257)}},
-			wantError: field.ErrorList{field.TooLongCharacters(field.NewPath("options", "page_token"), "", 256).WithOrigin("maxLength")},
+			name: "too-large page_token",
+			req: &ateapi.ListTagsRequest{
+				Atespace: "ns1",
+				Options:  &ateapi.ListOptions{PageToken: strings.Repeat("x", 257)},
+			},
+			wantError: field.ErrorList{
+				field.TooLongCharacters(field.NewPath("options", "page_token"), "", 256).WithOrigin("maxLength"),
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -624,9 +656,11 @@ func TestValidateGetTagRequest(t *testing.T) {
 			wantError: field.ErrorList{field.Required(field.NewPath("tag", "atespace"), "")},
 		},
 		{
-			name:      "invalid tag.atespace",
-			req:       &ateapi.GetTagRequest{Tag: &ateapi.ObjectRef{Atespace: "NS1", Name: "tag1"}},
-			wantError: field.ErrorList{field.Invalid(field.NewPath("tag", "atespace"), nil, "").WithOrigin("format=k8s-short-name")},
+			name: "invalid tag.atespace",
+			req:  &ateapi.GetTagRequest{Tag: &ateapi.ObjectRef{Atespace: "NS1", Name: "tag1"}},
+			wantError: field.ErrorList{
+				field.Invalid(field.NewPath("tag", "atespace"), nil, "").WithOrigin("format=k8s-short-name"),
+			},
 		},
 		{
 			name:      "missing tag.name",
@@ -634,9 +668,11 @@ func TestValidateGetTagRequest(t *testing.T) {
 			wantError: field.ErrorList{field.Required(field.NewPath("tag", "name"), "")},
 		},
 		{
-			name:      "invalid tag.name",
-			req:       &ateapi.GetTagRequest{Tag: &ateapi.ObjectRef{Atespace: "ns1", Name: "TAG1"}},
-			wantError: field.ErrorList{field.Invalid(field.NewPath("tag", "name"), nil, "").WithOrigin("format=k8s-short-name")},
+			name: "invalid tag.name",
+			req:  &ateapi.GetTagRequest{Tag: &ateapi.ObjectRef{Atespace: "ns1", Name: "TAG1"}},
+			wantError: field.ErrorList{
+				field.Invalid(field.NewPath("tag", "name"), nil, "").WithOrigin("format=k8s-short-name"),
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -669,9 +705,11 @@ func TestValidateDeleteTagRequest(t *testing.T) {
 			wantError: field.ErrorList{field.Required(field.NewPath("tag", "atespace"), "")},
 		},
 		{
-			name:      "invalid tag.atespace",
-			req:       &ateapi.DeleteTagRequest{Tag: &ateapi.ObjectRef{Atespace: "NS1", Name: "tag1"}},
-			wantError: field.ErrorList{field.Invalid(field.NewPath("tag", "atespace"), nil, "").WithOrigin("format=k8s-short-name")},
+			name: "invalid tag.atespace",
+			req:  &ateapi.DeleteTagRequest{Tag: &ateapi.ObjectRef{Atespace: "NS1", Name: "tag1"}},
+			wantError: field.ErrorList{
+				field.Invalid(field.NewPath("tag", "atespace"), nil, "").WithOrigin("format=k8s-short-name"),
+			},
 		},
 		{
 			name:      "missing tag.name",
@@ -679,9 +717,11 @@ func TestValidateDeleteTagRequest(t *testing.T) {
 			wantError: field.ErrorList{field.Required(field.NewPath("tag", "name"), "")},
 		},
 		{
-			name:      "invalid tag.name",
-			req:       &ateapi.DeleteTagRequest{Tag: &ateapi.ObjectRef{Atespace: "ns1", Name: "TAG1"}},
-			wantError: field.ErrorList{field.Invalid(field.NewPath("tag", "name"), nil, "").WithOrigin("format=k8s-short-name")},
+			name: "invalid tag.name",
+			req:  &ateapi.DeleteTagRequest{Tag: &ateapi.ObjectRef{Atespace: "ns1", Name: "TAG1"}},
+			wantError: field.ErrorList{
+				field.Invalid(field.NewPath("tag", "name"), nil, "").WithOrigin("format=k8s-short-name"),
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -695,7 +735,9 @@ func validTag(mutate ...func(*ateapi.Tag)) *ateapi.Tag {
 	tag := &ateapi.Tag{
 		Metadata: validResourceMetadata(),
 		Status: &ateapi.TagStatus{
-			Snapshot:         validSnapshot(func(s *ateapi.Snapshot) { s.Owner = ateapi.SnapshotOwner_SNAPSHOT_OWNER_TAG }),
+			Snapshot: validSnapshot(func(s *ateapi.Snapshot) {
+				s.Owner = ateapi.SnapshotOwner_SNAPSHOT_OWNER_TAG
+			}),
 			ActorTemplateUid: someActorUID,
 		},
 		Scope:       ateapi.TagScope_TAG_SCOPE_ATESPACE,

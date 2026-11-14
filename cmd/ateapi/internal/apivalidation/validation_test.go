@@ -93,11 +93,15 @@ func TestValidateResourceMetadataCreate(t *testing.T) {
 		want: nil,
 	}, {
 		name: "invalid createTime: seconds out of range",
-		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.CreateTime = &timestamppb.Timestamp{Seconds: 253402300800} }),
+		obj: valid(func(rm *ateapi.ResourceMetadata) {
+			rm.CreateTime = &timestamppb.Timestamp{Seconds: 253402300800}
+		}),
 		want: field.ErrorList{field.Invalid(field.NewPath("create_time"), nil, "")},
 	}, {
 		name: "invalid updateTime: negative nanos",
-		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.UpdateTime = &timestamppb.Timestamp{Seconds: 5309, Nanos: -1} }),
+		obj: valid(func(rm *ateapi.ResourceMetadata) {
+			rm.UpdateTime = &timestamppb.Timestamp{Seconds: 5309, Nanos: -1}
+		}),
 		want: field.ErrorList{field.Invalid(field.NewPath("update_time"), nil, "")},
 	}, {
 		name: "invalid updateTime: precedes createTime",
@@ -958,7 +962,9 @@ func TestValidateSnapshotUpdate(t *testing.T) {
 		{
 			name:   "snapshot_uri repaired",
 			oldObj: badSnapshot(),
-			newObj: badSnapshot(func(s *ateapi.Snapshot) { s.DurableSnapshot.Object.SnapshotUri = validObjectSnapshot().SnapshotUri }),
+			newObj: badSnapshot(func(s *ateapi.Snapshot) {
+				s.DurableSnapshot.Object.SnapshotUri = validObjectSnapshot().SnapshotUri
+			}),
 		},
 		{
 			name:   "every field repaired",
