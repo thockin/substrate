@@ -62,10 +62,6 @@ var (
 	// ErrPreconditionRequired indicates an update was called with a precondition
 	// missing either guard (uid or version). Blind writes are not accepted.
 	ErrPreconditionRequired = errors.New("persistence: precondition required")
-
-	// ErrImmutableField indicates an update's mutation changed a field that is
-	// immutable for the lifetime of the stored object.
-	ErrImmutableField = errors.New("persistence: immutable field")
 )
 
 // Interface defines the contract for the persistence layer storing actor state.
@@ -152,10 +148,7 @@ type Interface interface {
 	//
 	// Returns ErrPreconditionRequired if the precondition omits either guard,
 	// ErrNotFound if missing, ErrUIDConflict or ErrVersionConflict if the
-	// respective preconditions fail, ErrImmutableField if the mutate funcion
-	// changed a field that is immutable, or mutate's own error otherwise.
-	//
-	// status.snapshot is immutable once set
+	// respective preconditions fail, or mutate's own error otherwise.
 	UpdateTag(ctx context.Context, tagRef resources.TagRef, precondition Precondition, mutate func(toUpdate *ateapi.Tag) error) (*ateapi.Tag, error)
 
 	// MarkTagForDeletion initiates the deletion of a tag. It sets
