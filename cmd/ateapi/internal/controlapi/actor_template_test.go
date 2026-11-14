@@ -463,11 +463,11 @@ func TestResolveActorTemplate_NotFound(t *testing.T) {
 	}
 }
 
-// TestUpdateActorTemplateMetadata pins the store's update behavior: the
-// server-assigned metadata is recomputed in place, and metadata identity is
-// immutable.
+// TestUpdateActorTemplateMetadata checks that a server-owned status write
+// bumps the version, and that a write that changes metadata is rejected.
 func TestUpdateActorTemplateMetadata(t *testing.T) {
 	persistence := newTestPersistence(t)
+	impl := newServiceImpl(persistence, nil)
 	ctx := context.Background()
 
 	if _, err := persistence.CreateAtespace(ctx, &ateapi.Atespace{Metadata: &ateapi.ResourceMetadata{Name: "ns1"}}); err != nil {
@@ -479,8 +479,7 @@ func TestUpdateActorTemplateMetadata(t *testing.T) {
 	}
 	ref := resources.ActorTemplateRefFromActorTemplate(created)
 
-	// A server-owned status write passes validation and bumps the version.
-	updated, err := persistence.UpdateActorTemplate(ctx, ref, store.PreconditionFrom(created), func(tmpl *ateapi.ActorTemplate) error {
+	updated, err := impl.UpdateActorTemplate(ctx, ref, store.PreconditionFrom(created), func(tmpl *ateapi.ActorTemplate) error {
 		tmpl.Status = &ateapi.ActorTemplateStatus{GoldenSnapshotStatus: &ateapi.GoldenSnapshotStatus{
 			GoldenTag: &ateapi.ObjectRef{Atespace: "ns1", Name: "golden-tag"},
 		}}
@@ -493,27 +492,16 @@ func TestUpdateActorTemplateMetadata(t *testing.T) {
 		t.Errorf("updated version = %d, want %d", got, want)
 	}
 
-	// A mutation that touches an immutable field is a server bug, rejected by
-	// the store.
 	for name, mutate := range map[string]func(*ateapi.ActorTemplate) error{
 		"atespace": func(tmpl *ateapi.ActorTemplate) error { tmpl.Metadata.Atespace = "ns2"; return nil },
 		"name":     func(tmpl *ateapi.ActorTemplate) error { tmpl.Metadata.Name = "tmpl-b"; return nil },
+		"uid": func(tmpl *ateapi.ActorTemplate) error {
+			tmpl.Metadata.Uid = "1e186271-b829-4085-b2b1-6b665c1a4f42"
+			return nil
+		},
 	} {
-		if _, err := persistence.UpdateActorTemplate(ctx, ref, store.PreconditionFrom(updated), mutate); err == nil {
-			t.Errorf("mutating %s succeeded, want error", name)
+		if _, err := impl.UpdateActorTemplate(ctx, ref, store.PreconditionFrom(updated), mutate); apierror.Code(err) != codes.Internal {
+			t.Errorf("mutating %s: error = %v, want an Internal error", name, err)
 		}
-	}
-
-	// Server-assigned metadata edits are overwritten, not errors: the store
-	// restores them from the stored value.
-	reverted, err := persistence.UpdateActorTemplate(ctx, ref, store.PreconditionFrom(updated), func(tmpl *ateapi.ActorTemplate) error {
-		tmpl.Metadata.Uid = "1e186271-b829-4085-b2b1-6b665c1a4f42"
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("UpdateActorTemplate with uid edit failed: %v", err)
-	}
-	if got, want := reverted.GetMetadata().GetUid(), created.GetMetadata().GetUid(); got != want {
-		t.Errorf("uid after update = %q, want %q", got, want)
 	}
 }
