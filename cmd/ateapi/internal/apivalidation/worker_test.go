@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"go.ate.dev/substrate/api/ateapi/v1"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
@@ -32,24 +31,24 @@ const (
 	apiOtherWorkerName = "1a7e4c83-6d20-4f95-b3c8-9e0a2f6d4b17"
 )
 
-// TestValidateWorker pins the field paths validateWorker reports.
+// TestValidateCreateWorkerRequest pins the field paths validateWorker reports.
 // TestCreateWorker_InvalidArgument drives the same rules through the RPC, but
 // only observes the status code.
 func TestValidateCreateWorkerRequest(t *testing.T) {
 	// This test verifies validation of user input for creation. The RPC scrubs
 	// status before validating, so status is absent from the valid shape; when
 	// a request does carry one, it is validated like any other field.
-	validReq := func(actor *ateapi.Worker, mods ...func(actor *ateapi.CreateWorkerRequest)) *ateapi.CreateWorkerRequest {
-		req := &ateapi.CreateWorkerRequest{
-			Worker: actor,
-		}
-		for _, m := range mods {
-			m(req)
-		}
-		return req
+	validReq := func(worker *ateapi.Worker) *ateapi.CreateWorkerRequest {
+		return &ateapi.CreateWorkerRequest{Worker: worker}
 	}
-	withStatus := withWorkerStatus
 	withMetadata := withWorkerMetadata
+	withSpiffeID := withWorkerSpiffeID
+	withLabels := withWorkerLabels
+	withStatus := withWorkerStatus
+	withState := withWorkerStatusState
+	withIPs := withWorkerStatusIPs
+	withCapacity := withWorkerStatusCapacity
+	withAllocated := withWorkerStatusAllocated
 
 	tests := []struct {
 		name string
@@ -75,17 +74,18 @@ func TestValidateCreateWorkerRequest(t *testing.T) {
 		want: field.ErrorList{field.Required(field.NewPath("worker", "metadata", "name"), "")},
 	}, {
 		name: "invalid metadata.name",
-		req: validReq(validWorker(apiWorkerName, withMetadata(func(m *ateapi.ResourceMetadata) {
-			m.Name = "not a name"
-		}))),
+		req: validReq(
+			validWorker(apiWorkerName,
+				withMetadata(func(m *ateapi.ResourceMetadata) {
+					m.Name = "not a name"
+				})),
+		),
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("worker", "metadata", "name"), nil, "").WithOrigin("format=k8s-short-name"),
 		},
 	}, {
 		name: "metadata.atespace set on a global-scoped Worker",
-		req: validReq(validWorker(apiWorkerName, withMetadata(func(m *ateapi.ResourceMetadata) {
-			m.Atespace = "team-a"
-		}))),
+		req:  validReq(validWorker(apiWorkerName, withMetadata(withMetadataAtespace("team-a")))),
 		want: field.ErrorList{field.Forbidden(field.NewPath("worker", "metadata", "atespace"), "")},
 	}, {
 		name: "missing worker_namespace",
@@ -139,100 +139,162 @@ func TestValidateCreateWorkerRequest(t *testing.T) {
 		},
 	}, {
 		name: "valid dual-stack status.ips",
-		req: validReq(validWorker(apiWorkerName, withStatus(func(s *ateapi.WorkerStatus) {
-			s.Ips = []string{"fd00::1", "10.1.2.3"}
-		}))),
+		req:  validReq(validWorker(apiWorkerName, withStatus(withIPs("fd00::1", "10.1.2.3")))),
 	}, {
 		name: "invalid status.ips",
-		req: validReq(validWorker(apiWorkerName, withStatus(func(s *ateapi.WorkerStatus) {
-			s.Ips = []string{"not-an-ip"}
-		}))),
+		req:  validReq(validWorker(apiWorkerName, withStatus(withIPs("not-an-ip")))),
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("worker", "status", "ips").Index(0), nil, "").WithOrigin("format=ip-strict"),
 		},
 	}, {
 		name: "two status.ips in one family",
-		req: validReq(validWorker(apiWorkerName, withStatus(func(s *ateapi.WorkerStatus) {
-			s.Ips = []string{"10.1.2.3", "10.1.2.4"}
-		}))),
+		req:  validReq(validWorker(apiWorkerName, withStatus(withIPs("10.1.2.3", "10.1.2.4")))),
 		want: field.ErrorList{field.Invalid(field.NewPath("worker", "status", "ips").Index(1), nil, "")},
 	}, {
 		name: "too many status.ips",
-		req: validReq(validWorker(apiWorkerName, withStatus(func(s *ateapi.WorkerStatus) {
-			s.Ips = []string{"10.1.2.3", "fd00::1", "10.1.2.4"}
-		}))),
+		req:  validReq(validWorker(apiWorkerName, withStatus(withIPs("10.1.2.3", "fd00::1", "10.1.2.4")))),
 		want: field.ErrorList{field.TooMany(field.NewPath("worker", "status", "ips"), 3, 2).WithOrigin("maxItems")},
 	}, {
+		// An invalid entry does not claim its family.
+		name: "invalid status.ips entry before a valid one",
+		req:  validReq(validWorker(apiWorkerName, withStatus(withIPs("not-an-ip", "10.1.2.3")))),
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("worker", "status", "ips").Index(0), nil, "").WithOrigin("format=ip-strict"),
+		},
+	}, {
+		name: "two IPv6 status.ips",
+		req:  validReq(validWorker(apiWorkerName, withStatus(withIPs("fd00::1", "fd00::2")))),
+		want: field.ErrorList{field.Invalid(field.NewPath("worker", "status", "ips").Index(1), nil, "")},
+	}, {
 		name: "negative status epochs",
-		req: validReq(validWorker(apiWorkerName, withStatus(func(s *ateapi.WorkerStatus) {
-			s.IssuedEpoch = -1
-			s.RegisteredEpoch = -1
-		}))),
+		req: validReq(
+			validWorker(apiWorkerName,
+				withStatus(func(s *ateapi.WorkerStatus) {
+					s.IssuedEpoch = -1
+					s.RegisteredEpoch = -1
+					s.ObservedEpoch = -1
+				})),
+		),
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("worker", "status", "issued_epoch"), nil, "").WithOrigin("minimum"),
 			field.Invalid(field.NewPath("worker", "status", "registered_epoch"), nil, "").WithOrigin("minimum"),
+			field.Invalid(field.NewPath("worker", "status", "observed_epoch"), nil, "").WithOrigin("minimum"),
+		},
+	}, {
+		name: "valid status.capacity",
+		req: validReq(
+			validWorker(apiWorkerName,
+				withStatus(
+					withCapacity(&ateapi.WorkerResources{
+						Actors:        10,
+						CpuMillicores: 999999,
+						MemoryBytes:   4 << 30,
+					}),
+				)),
+		),
+	}, {
+		name: "negative status.capacity.cpu_millicores",
+		req: validReq(
+			validWorker(apiWorkerName,
+				withStatus(
+					withCapacity(&ateapi.WorkerResources{
+						CpuMillicores: -1,
+					}),
+				)),
+		),
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("worker", "status", "capacity", "cpu_millicores"), nil, "").WithOrigin("minimum"),
+		},
+	}, {
+		name: "status.capacity.cpu_millicores above the maximum",
+		req: validReq(
+			validWorker(apiWorkerName, withStatus(withCapacity(&ateapi.WorkerResources{CpuMillicores: 1000000}))),
+		),
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("worker", "status", "capacity", "cpu_millicores"), nil, "").WithOrigin("maximum"),
+		},
+	}, {
+		name: "negative status.allocated.memory_bytes",
+		req:  validReq(validWorker(apiWorkerName, withStatus(withAllocated(&ateapi.WorkerResources{MemoryBytes: -1})))),
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("worker", "status", "allocated", "memory_bytes"), nil, "").WithOrigin("minimum"),
 		},
 	}, {
 		name: "valid worker_spiffe_id",
-		req: validReq(validWorker(apiWorkerName, func(w *ateapi.Worker) {
-			w.WorkerSpiffeId = "spiffe://cluster.local/ns/ate-system/sa/ateworker"
-		})),
+		req:  validReq(validWorker(apiWorkerName, withSpiffeID("spiffe://cluster.local/ns/ate-system/sa/ateworker"))),
 	}, {
 		name: "invalid worker_spiffe_id",
-		req: validReq(validWorker(apiWorkerName, func(w *ateapi.Worker) {
-			w.WorkerSpiffeId = "https://cluster.local/ns/ate-system/sa/ateworker"
-		})),
+		req:  validReq(validWorker(apiWorkerName, withSpiffeID("https://cluster.local/ns/ate-system/sa/ateworker"))),
 		want: field.ErrorList{field.Invalid(field.NewPath("worker", "worker_spiffe_id"), nil, "")},
 	}, {
 		name: "worker_spiffe_id too long",
-		req: validReq(validWorker(apiWorkerName, func(w *ateapi.Worker) {
-			w.WorkerSpiffeId = "spiffe://cluster.local/" + strings.Repeat("a", 2048)
-		})),
+		req:  validReq(validWorker(apiWorkerName, withSpiffeID("spiffe://cluster.local/"+strings.Repeat("a", 2048)))),
 		want: field.ErrorList{
 			field.TooLong(field.NewPath("worker", "worker_spiffe_id"), nil, 2048).WithOrigin("maxLength"),
 		},
 	}, {
+		name: "worker_spiffe_id with a trailing slash",
+		req:  validReq(validWorker(apiWorkerName, withSpiffeID("spiffe://cluster.local/ns/ate-system/sa/ateworker/"))),
+		want: field.ErrorList{field.Invalid(field.NewPath("worker", "worker_spiffe_id"), nil, "")},
+	}, {
+		name: "worker_spiffe_id with an uppercase trust domain",
+		req:  validReq(validWorker(apiWorkerName, withSpiffeID("spiffe://Cluster.Local/ns/ate-system/sa/ateworker"))),
+		want: field.ErrorList{field.Invalid(field.NewPath("worker", "worker_spiffe_id"), nil, "")},
+	}, {
+		name: "worker_spiffe_id without a trust domain",
+		req:  validReq(validWorker(apiWorkerName, withSpiffeID("spiffe://"))),
+		want: field.ErrorList{field.Invalid(field.NewPath("worker", "worker_spiffe_id"), nil, "")},
+	}, {
 		name: "valid labels",
-		req: validReq(validWorker(apiWorkerName, func(w *ateapi.Worker) {
-			w.Labels = map[string]string{"tier": "batch", "pool.ate.io/zone": "us-west1-c"}
-		})),
+		req: validReq(
+			validWorker(apiWorkerName,
+				withLabels(map[string]string{
+					"tier":             "batch",
+					"pool.ate.io/zone": "us-west1-c",
+				})),
+		),
 	}, {
 		name: "too many labels",
-		req: validReq(validWorker(apiWorkerName, func(w *ateapi.Worker) {
-			labels := make(map[string]string, 65)
-			for i := 0; i < 65; i++ {
-				labels[fmt.Sprintf("key-%d", i)] = "v"
-			}
-			w.Labels = labels
-		})),
+		req: validReq(
+			validWorker(apiWorkerName, func(w *ateapi.Worker) {
+				labels := make(map[string]string, 65)
+				for i := range 65 {
+					labels[fmt.Sprintf("key-%d", i)] = "v"
+				}
+				withLabels(labels)(w)
+			}),
+		),
 		want: field.ErrorList{field.TooMany(field.NewPath("worker", "labels"), 65, 64).WithOrigin("maxProperties")},
 	}, {
 		name: "invalid label key",
-		req: validReq(validWorker(apiWorkerName, func(w *ateapi.Worker) {
-			w.Labels = map[string]string{"bad key!": "batch"}
-		})),
+		req:  validReq(validWorker(apiWorkerName, withLabels(map[string]string{"bad key!": "batch"}))),
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("worker", "labels"), "bad key!", "").WithOrigin("format=k8s-label-key"),
 		},
 	}, {
 		name: "invalid label value",
-		req: validReq(validWorker(apiWorkerName, func(w *ateapi.Worker) {
-			w.Labels = map[string]string{"tier": "not valid!"}
-		})),
+		req:  validReq(validWorker(apiWorkerName, withLabels(map[string]string{"tier": "not valid!"}))),
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("worker", "labels").Key("tier"), "not valid!", "").WithOrigin("format=k8s-label-value"),
 		},
 	}, {
 		name: "status needs a state",
-		req:  validReq(validWorker(apiWorkerName, withStatus(func(s *ateapi.WorkerStatus) { s.State = 0 }))),
+		req:  validReq(validWorker(apiWorkerName, withStatus(withState(ateapi.WorkerState_WORKER_STATE_UNSPECIFIED)))),
 		want: field.ErrorList{field.Required(field.NewPath("worker", "status", "state"), "")},
 	}, {
+		name: "valid draining status.state",
+		req:  validReq(validWorker(apiWorkerName, withStatus(withState(ateapi.WorkerState_WORKER_STATE_DRAINING)))),
+	}, {
+		// UNAVAILABLE is the last state, so this is the upper bound.
+		name: "valid unavailable status.state",
+		req:  validReq(validWorker(apiWorkerName, withStatus(withState(ateapi.WorkerState_WORKER_STATE_UNAVAILABLE)))),
+	}, {
 		name: "status invalid state (too small)",
-		req:  validReq(validWorker(apiWorkerName, withStatus(func(s *ateapi.WorkerStatus) { s.State = -1 }))),
+		req:  validReq(validWorker(apiWorkerName, withStatus(withState(-1)))),
 		want: field.ErrorList{field.Invalid(field.NewPath("worker", "status", "state"), nil, "").WithOrigin("minimum")},
 	}, {
 		name: "status invalid state (too large)",
-		req:  validReq(validWorker(apiWorkerName, withStatus(func(s *ateapi.WorkerStatus) { s.State = 99 }))),
+		req:  validReq(validWorker(apiWorkerName, withStatus(withState(99)))),
 		want: field.ErrorList{field.Invalid(field.NewPath("worker", "status", "state"), nil, "").WithOrigin("maximum")},
 	}}
 	for _, tc := range tests {
@@ -240,6 +302,158 @@ func TestValidateCreateWorkerRequest(t *testing.T) {
 			assertValidateErr(t, ValidateCreateWorkerRequest(context.Background(), tc.req), tc.want)
 		})
 	}
+}
+
+func TestValidateGetWorkerRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *ateapi.GetWorkerRequest
+		want field.ErrorList
+	}{{
+		name: "valid",
+		req:  &ateapi.GetWorkerRequest{Worker: workerRef(apiWorkerName)},
+	}, {
+		name: "missing worker",
+		req:  &ateapi.GetWorkerRequest{},
+		want: field.ErrorList{field.Required(field.NewPath("worker"), "")},
+	}, {
+		name: "missing worker.name",
+		req:  &ateapi.GetWorkerRequest{Worker: &ateapi.ObjectRef{}},
+		want: field.ErrorList{field.Required(field.NewPath("worker", "name"), "")},
+	}, {
+		name: "worker.atespace must be empty",
+		req:  &ateapi.GetWorkerRequest{Worker: &ateapi.ObjectRef{Atespace: "team-a", Name: apiWorkerName}},
+		want: field.ErrorList{field.Forbidden(field.NewPath("worker", "atespace"), "")},
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertValidateErr(t, ValidateGetWorkerRequest(context.Background(), tt.req), tt.want)
+		})
+	}
+}
+
+func TestValidateListWorkersRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *ateapi.ListWorkersRequest
+		want field.ErrorList
+	}{{
+		name: "valid",
+		req:  &ateapi.ListWorkersRequest{},
+	}, {
+		name: "valid with options",
+		req:  &ateapi.ListWorkersRequest{Options: &ateapi.ListOptions{PageSize: 10, PageToken: "t"}},
+	}, {
+		name: "negative page_size",
+		req:  &ateapi.ListWorkersRequest{Options: &ateapi.ListOptions{PageSize: -1}},
+		want: field.ErrorList{field.Invalid(field.NewPath("options", "page_size"), nil, "").WithOrigin("minimum")},
+	}, {
+		name: "page_token too long",
+		req:  &ateapi.ListWorkersRequest{Options: &ateapi.ListOptions{PageToken: strings.Repeat("t", 257)}},
+		want: field.ErrorList{field.TooLong(field.NewPath("options", "page_token"), "", 256).WithOrigin("maxLength")},
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertValidateErr(t, ValidateListWorkersRequest(context.Background(), tt.req), tt.want)
+		})
+	}
+}
+
+func TestValidateListWorkerActorAssignmentsRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *ateapi.ListWorkerActorAssignmentsRequest
+		want field.ErrorList
+	}{{
+		name: "valid",
+		req:  &ateapi.ListWorkerActorAssignmentsRequest{Worker: workerRef(apiWorkerName)},
+	}, {
+		name: "valid with options",
+		req: &ateapi.ListWorkerActorAssignmentsRequest{
+			Worker:  workerRef(apiWorkerName),
+			Options: &ateapi.ListOptions{PageSize: 10},
+		},
+	}, {
+		name: "missing worker",
+		req:  &ateapi.ListWorkerActorAssignmentsRequest{},
+		want: field.ErrorList{field.Required(field.NewPath("worker"), "")},
+	}, {
+		name: "worker.atespace must be empty",
+		req: &ateapi.ListWorkerActorAssignmentsRequest{
+			Worker: &ateapi.ObjectRef{Atespace: "team-a", Name: apiWorkerName},
+		},
+		want: field.ErrorList{field.Forbidden(field.NewPath("worker", "atespace"), "")},
+	}, {
+		name: "negative page_size",
+		req: &ateapi.ListWorkerActorAssignmentsRequest{
+			Worker:  workerRef(apiWorkerName),
+			Options: &ateapi.ListOptions{PageSize: -1},
+		},
+		want: field.ErrorList{field.Invalid(field.NewPath("options", "page_size"), nil, "").WithOrigin("minimum")},
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertValidateErr(t, ValidateListWorkerActorAssignmentsRequest(context.Background(), tt.req), tt.want)
+		})
+	}
+}
+
+// testWorkerRefRequest runs the cases for a request that carries nothing but a
+// worker ref, which validate builds and validates.
+func testWorkerRefRequest(t *testing.T, validate func(*ateapi.ObjectRef) field.ErrorList) {
+	t.Helper()
+	tests := []struct {
+		name string
+		ref  *ateapi.ObjectRef
+		want field.ErrorList
+	}{{
+		name: "valid",
+		ref:  workerRef(apiWorkerName),
+	}, {
+		name: "missing worker",
+		ref:  nil,
+		want: field.ErrorList{field.Required(field.NewPath("worker"), "")},
+	}, {
+		name: "missing worker.name",
+		ref:  &ateapi.ObjectRef{},
+		want: field.ErrorList{field.Required(field.NewPath("worker", "name"), "")},
+	}, {
+		name: "invalid worker.name",
+		ref:  workerRef("UPPER"),
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("worker", "name"), nil, "").WithOrigin("format=k8s-short-name"),
+		},
+	}, {
+		name: "worker.atespace must be empty",
+		ref:  &ateapi.ObjectRef{Atespace: "team-a", Name: apiWorkerName},
+		want: field.ErrorList{field.Forbidden(field.NewPath("worker", "atespace"), "")},
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertValidateErr(t, validate(tt.ref), tt.want)
+		})
+	}
+}
+
+func TestValidateDrainWorkerRequest(t *testing.T) {
+	testWorkerRefRequest(t, func(ref *ateapi.ObjectRef) field.ErrorList {
+		return ValidateDrainWorkerRequest(context.Background(), &ateapi.DrainWorkerRequest{Worker: ref})
+	})
+}
+
+func TestValidateMarkWorkerAvailableRequest(t *testing.T) {
+	testWorkerRefRequest(t, func(ref *ateapi.ObjectRef) field.ErrorList {
+		return ValidateMarkWorkerAvailableRequest(context.Background(), &ateapi.MarkWorkerAvailableRequest{Worker: ref})
+	})
+}
+
+func TestValidateMarkWorkerUnavailableRequest(t *testing.T) {
+	testWorkerRefRequest(t, func(ref *ateapi.ObjectRef) field.ErrorList {
+		return ValidateMarkWorkerUnavailableRequest(
+			context.Background(),
+			&ateapi.MarkWorkerUnavailableRequest{Worker: ref},
+		)
+	})
 }
 
 func TestValidateDeleteWorkerRequest(t *testing.T) {
@@ -304,29 +518,26 @@ func TestValidateUpdateWorkerRequest(t *testing.T) {
 	// This test verifies validation of user input for update. The worker body
 	// is deliberately not descended into here (updates are validated in two
 	// steps); only the metadata that addresses the resource is checked.
-	validReq := func(mods ...func(w *ateapi.Worker)) *ateapi.UpdateWorkerRequest {
-		worker := validWorker(apiWorkerName)
-		worker.Metadata.Uid = apiOtherWorkerName
-		worker.Metadata.Version = 3
-		for _, m := range mods {
-			m(worker)
-		}
+	validReq := func(worker *ateapi.Worker) *ateapi.UpdateWorkerRequest {
 		return &ateapi.UpdateWorkerRequest{Worker: worker}
 	}
+	withMetadata := withWorkerMetadata
+	withUID := withMetadataUID
+	withVersion := withMetadataVersion
 
 	tests := []struct {
 		name string
 		req  *ateapi.UpdateWorkerRequest
 		want field.ErrorList
 	}{{
-		"valid",
-		validReq(),
-		nil,
-	}, {
 		// uid and version are preconditions the store requires; the request
 		// validation deliberately leaves their presence to the store.
-		"missing uid and version pass request validation",
-		validReq(func(w *ateapi.Worker) { w.Metadata.Uid = ""; w.Metadata.Version = 0 }),
+		"valid",
+		validReq(validWorker(apiWorkerName)),
+		nil,
+	}, {
+		"valid with preconditions",
+		validReq(validWorker(apiWorkerName, withMetadata(withUID(), withVersion()))),
 		nil,
 	}, {
 		"missing worker",
@@ -334,27 +545,33 @@ func TestValidateUpdateWorkerRequest(t *testing.T) {
 		field.ErrorList{field.Required(field.NewPath("worker"), "")},
 	}, {
 		"missing metadata",
-		validReq(func(w *ateapi.Worker) { w.Metadata = nil }),
+		validReq(validWorker(apiWorkerName, func(w *ateapi.Worker) { w.Metadata = nil })),
 		field.ErrorList{field.Required(field.NewPath("worker", "metadata"), "")},
 	}, {
 		"missing metadata.name",
-		validReq(func(w *ateapi.Worker) { w.Metadata.Name = "" }),
+		validReq(validWorker(apiWorkerName, withMetadata(func(m *ateapi.ResourceMetadata) { m.Name = "" }))),
 		field.ErrorList{field.Required(field.NewPath("worker", "metadata", "name"), "")},
 	}, {
 		"invalid metadata.name",
-		validReq(func(w *ateapi.Worker) { w.Metadata.Name = "Not A Name" }),
+		validReq(validWorker(apiWorkerName, withMetadata(func(m *ateapi.ResourceMetadata) { m.Name = "Not A Name" }))),
 		field.ErrorList{
 			field.Invalid(field.NewPath("worker", "metadata", "name"), nil, "").WithOrigin("format=k8s-short-name"),
 		},
 	}, {
 		"invalid metadata.uid",
-		validReq(func(w *ateapi.Worker) { w.Metadata.Uid = "not-a-uuid" }),
+		validReq(validWorker(apiWorkerName, withMetadata(func(m *ateapi.ResourceMetadata) { m.Uid = "not-a-uuid" }))),
 		field.ErrorList{
 			field.Invalid(field.NewPath("worker", "metadata", "uid"), nil, "").WithOrigin("format=k8s-uuid"),
 		},
 	}, {
+		"negative metadata.version",
+		validReq(validWorker(apiWorkerName, withMetadata(func(m *ateapi.ResourceMetadata) { m.Version = -1 }))),
+		field.ErrorList{
+			field.Invalid(field.NewPath("worker", "metadata", "version"), nil, "").WithOrigin("minimum"),
+		},
+	}, {
 		"metadata.atespace set on a global-scoped Worker",
-		validReq(func(w *ateapi.Worker) { w.Metadata.Atespace = "team-a" }),
+		validReq(validWorker(apiWorkerName, withMetadata(withMetadataAtespace("team-a")))),
 		field.ErrorList{field.Forbidden(field.NewPath("worker", "metadata", "atespace"), "")},
 	}}
 	for _, tt := range tests {
@@ -364,29 +581,286 @@ func TestValidateUpdateWorkerRequest(t *testing.T) {
 	}
 }
 
-// TestValidateWorkerUpdate_RequireStatus pins the final-object check that the
-// RPC path cannot reach: the server always sets status before storing, so only
-// a direct call shows the guard catching a worker without one.
-func TestValidateWorkerUpdate_RequireStatus(t *testing.T) {
-	oldVal := validWorker(apiWorkerName)
-	oldVal.Status = &ateapi.WorkerStatus{State: ateapi.WorkerState_WORKER_STATE_ACTIVE}
-	newVal := proto.Clone(oldVal).(*ateapi.Worker)
-	newVal.Status = nil
+// TestValidateWorkerUpdate covers the final-object checks on a Worker against
+// the stored one. Status reaches the store from the server, which no request
+// validator sees, so this is the only check on it.
+func TestValidateWorkerUpdate(t *testing.T) {
+	withMetadata := withWorkerMetadata
+	withUID := withMetadataUID
+	withSpiffeID := withWorkerSpiffeID
+	withLabels := withWorkerLabels
+	withStatus := withWorkerStatus
+	withSandboxClasses := withWorkerStatusSandboxClasses
+	withRestorableRuntimes := withSandboxClassRestorableRuntimes
 
-	want := field.ErrorList{field.Required(field.NewPath("worker", "status"), "")}
-	assertValidateErr(
-		t,
-		ValidateWorkerUpdate(context.Background(), field.NewPath("worker"), newVal, oldVal, true),
-		want,
-	)
-
-	// Without requireStatus the same worker passes: status is optional in the
-	// schema, and clearing it is not otherwise constrained.
-	assertValidateErr(
-		t,
-		ValidateWorkerUpdate(context.Background(), field.NewPath("worker"), newVal, oldVal, false),
-		nil,
-	)
+	tests := []struct {
+		name          string
+		oldVal        *ateapi.Worker
+		newVal        *ateapi.Worker
+		requireStatus bool
+		want          field.ErrorList
+	}{{
+		name:          "unchanged",
+		oldVal:        validWorker(apiWorkerName, withStatus()),
+		newVal:        validWorker(apiWorkerName, withStatus()),
+		requireStatus: true,
+	}, {
+		// The server always sets status before storing, so only a direct call
+		// shows the guard catching a worker without one.
+		name:          "status cleared, required",
+		oldVal:        validWorker(apiWorkerName, withStatus()),
+		newVal:        validWorker(apiWorkerName),
+		requireStatus: true,
+		want:          field.ErrorList{field.Required(field.NewPath("worker", "status"), "")},
+	}, {
+		// Status is optional in the schema, and clearing it is not otherwise
+		// constrained.
+		name:   "status cleared, not required",
+		oldVal: validWorker(apiWorkerName, withStatus()),
+		newVal: validWorker(apiWorkerName),
+	}, {
+		name:          "labels changed",
+		oldVal:        validWorker(apiWorkerName, withStatus(), withLabels(map[string]string{"tier": "batch"})),
+		newVal:        validWorker(apiWorkerName, withStatus(), withLabels(map[string]string{"tier": "online"})),
+		requireStatus: true,
+	}, {
+		name:          "labels cleared",
+		oldVal:        validWorker(apiWorkerName, withStatus(), withLabels(map[string]string{"tier": "batch"})),
+		newVal:        validWorker(apiWorkerName, withStatus()),
+		requireStatus: true,
+	}, {
+		name:   "metadata.uid changed",
+		oldVal: validWorker(apiWorkerName, withStatus(), withMetadata(withUID())),
+		newVal: validWorker(
+			apiWorkerName,
+			withStatus(),
+			withMetadata(func(m *ateapi.ResourceMetadata) { m.Uid = apiOtherWorkerName }),
+		),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("worker", "metadata", "uid"), nil, "").WithOrigin("immutable"),
+		},
+	}, {
+		name:   "metadata.name changed",
+		oldVal: validWorker(apiWorkerName, withStatus()),
+		newVal: validWorker(
+			apiWorkerName,
+			withStatus(),
+			withMetadata(func(m *ateapi.ResourceMetadata) { m.Name = apiOtherWorkerName }),
+		),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("worker", "metadata", "name"), nil, "").WithOrigin("immutable"),
+		},
+	}, {
+		name:          "metadata.atespace set",
+		oldVal:        validWorker(apiWorkerName, withStatus()),
+		newVal:        validWorker(apiWorkerName, withStatus(), withMetadata(withMetadataAtespace("team-a"))),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.Forbidden(field.NewPath("worker", "metadata", "atespace"), ""),
+			field.Invalid(field.NewPath("worker", "metadata", "atespace"), nil, "").WithOrigin("immutable"),
+		},
+	}, {
+		name:          "worker_namespace changed",
+		oldVal:        validWorker(apiWorkerName, withStatus()),
+		newVal:        validWorker(apiWorkerName, withStatus(), func(w *ateapi.Worker) { w.WorkerNamespace = "other" }),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("worker", "worker_namespace"), nil, "").WithOrigin("immutable"),
+		},
+	}, {
+		name:          "worker_pool changed",
+		oldVal:        validWorker(apiWorkerName, withStatus()),
+		newVal:        validWorker(apiWorkerName, withStatus(), func(w *ateapi.Worker) { w.WorkerPool = "pool-2" }),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("worker", "worker_pool"), nil, "").WithOrigin("immutable"),
+		},
+	}, {
+		name:   "worker_pod changed",
+		oldVal: validWorker(apiWorkerName, withStatus()),
+		newVal: validWorker(
+			apiWorkerName,
+			withStatus(),
+			func(w *ateapi.Worker) { w.WorkerPod = "worker-pod-2" },
+		),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("worker", "worker_pod"), nil, "").WithOrigin("immutable"),
+		},
+	}, {
+		name:   "worker_pod_uid changed",
+		oldVal: validWorker(apiWorkerName, withStatus()),
+		newVal: validWorker(
+			apiWorkerName,
+			withStatus(),
+			func(w *ateapi.Worker) { w.WorkerPodUid = apiOtherWorkerName },
+		),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("worker", "worker_pod_uid"), nil, "").WithOrigin("immutable"),
+		},
+	}, {
+		name:          "node_name changed",
+		oldVal:        validWorker(apiWorkerName, withStatus()),
+		newVal:        validWorker(apiWorkerName, withStatus(), func(w *ateapi.Worker) { w.NodeName = "node-2" }),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("worker", "node_name"), nil, "").WithOrigin("immutable"),
+		},
+	}, {
+		name: "worker_spiffe_id changed",
+		oldVal: validWorker(
+			apiWorkerName,
+			withStatus(),
+			withSpiffeID("spiffe://cluster.local/ns/ate-system/sa/a"),
+		),
+		newVal: validWorker(
+			apiWorkerName,
+			withStatus(),
+			withSpiffeID("spiffe://cluster.local/ns/ate-system/sa/b"),
+		),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("worker", "worker_spiffe_id"), nil, "").WithOrigin("immutable"),
+		},
+	}, {
+		name:          "valid sandbox runtimes",
+		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass(withRestorableRuntimes(sandboxRuntimes(32)...))))),
+		requireStatus: true,
+	}, {
+		name:          "valid microvm sandbox class",
+		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass(withSandboxClassName("microvm"))))),
+		requireStatus: true,
+	}, {
+		name:          "empty sandbox_classes",
+		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses())),
+		requireStatus: true,
+	}, {
+		name:          "nil sandbox_classes entry",
+		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(nil))),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.Required(field.NewPath("worker", "status", "sandbox_classes").Index(0), ""),
+		},
+	}, {
+		name:   "too many sandbox_classes",
+		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		newVal: validWorker(apiWorkerName,
+			withStatus(withSandboxClasses(validSandboxClass(), validSandboxClass(withSandboxClassName("microvm"))))),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.TooMany(field.NewPath("worker", "status", "sandbox_classes"), 2, 1).WithOrigin("maxItems"),
+		},
+	}, {
+		name:          "missing sandbox_classes.sandbox_class",
+		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass(withSandboxClassName(""))))),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.Required(field.NewPath("worker", "status", "sandbox_classes").Index(0).Child("sandbox_class"), ""),
+		},
+	}, {
+		name:          "unsupported sandbox_classes.sandbox_class",
+		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass(withSandboxClassName("kata"))))),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.NotSupported[string](field.NewPath("worker", "status", "sandbox_classes").Index(0).Child("sandbox_class"), nil, nil),
+		},
+	}, {
+		name:   "missing sandbox_classes.default_runtime",
+		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		newVal: validWorker(apiWorkerName,
+			withStatus(
+				withSandboxClasses(
+					validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+						c.DefaultRuntime = nil
+					}),
+				),
+			)),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.Required(field.NewPath("worker", "status", "sandbox_classes").Index(0).Child("default_runtime"), ""),
+		},
+	}, {
+		name:   "missing sandbox_classes.default_runtime.version",
+		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		newVal: validWorker(apiWorkerName,
+			withStatus(
+				withSandboxClasses(
+					validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+						c.DefaultRuntime.Version = nil
+					}),
+				),
+			)),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.Required(field.NewPath("worker", "status", "sandbox_classes").Index(0).Child("default_runtime", "version"), ""),
+		},
+	}, {
+		name:   "too many default_runtime attributes",
+		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		newVal: validWorker(apiWorkerName,
+			withStatus(
+				withSandboxClasses(
+					validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+						c.DefaultRuntime.Version.Attributes = attributeEntries(33)
+					}),
+				),
+			)),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.TooMany(field.NewPath("worker", "status", "sandbox_classes").Index(0).Child("default_runtime", "version", "attributes"), 33, 32).WithOrigin("maxItems"),
+		},
+	}, {
+		name:   "invalid restorable_runtimes entry",
+		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		newVal: validWorker(apiWorkerName,
+			withStatus(
+				withSandboxClasses(
+					validSandboxClass(
+						withRestorableRuntimes(
+							sandboxRuntime(func(r *ateapi.WorkerSandboxRuntime) {
+								r.Version.SchemaVersion = ""
+							}),
+						),
+					),
+				),
+			)),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.Required(field.NewPath("worker", "status", "sandbox_classes").Index(0).Child("restorable_runtimes").Index(0).Child("version", "schema_version"), ""),
+		},
+	}, {
+		name:          "too many restorable_runtimes",
+		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass(withRestorableRuntimes(sandboxRuntimes(33)...))))),
+		requireStatus: true,
+		want: field.ErrorList{
+			field.TooMany(field.NewPath("worker", "status", "sandbox_classes").Index(0).Child("restorable_runtimes"), 33, 32).WithOrigin("maxItems"),
+		},
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertValidateErr(
+				t,
+				ValidateWorkerUpdate(
+					context.Background(),
+					field.NewPath("worker"),
+					tt.newVal,
+					tt.oldVal,
+					tt.requireStatus,
+				),
+				tt.want,
+			)
+		})
+	}
 }
 
 func TestValidateAcquireWorkerEpochRequest(t *testing.T) {
@@ -418,20 +892,25 @@ func TestValidateAcquireWorkerEpochRequest(t *testing.T) {
 }
 
 func TestValidateRegisterWorkerRequest(t *testing.T) {
+	// valid returns the smallest valid request. capacity is required, but all
+	// of its fields are optional.
 	valid := func(mutate ...func(*ateapi.RegisterWorkerRequest)) *ateapi.RegisterWorkerRequest {
 		r := &ateapi.RegisterWorkerRequest{
-			Worker: workerRef(apiWorkerName),
-			Epoch:  1,
-			Ips:    []string{"10.1.2.3"},
-			Capacity: &ateapi.WorkerResources{
-				Actors:        10,
-				CpuMillicores: 2000, MemoryBytes: 4 << 30,
-			},
+			Worker:   workerRef(apiWorkerName),
+			Epoch:    1,
+			Ips:      []string{"10.1.2.3"},
+			Capacity: &ateapi.WorkerResources{},
 		}
 		for _, m := range mutate {
 			m(r)
 		}
 		return r
+	}
+	withIPs := func(ips ...string) func(*ateapi.RegisterWorkerRequest) {
+		return func(r *ateapi.RegisterWorkerRequest) { r.Ips = ips }
+	}
+	withCapacity := func(c *ateapi.WorkerResources) func(*ateapi.RegisterWorkerRequest) {
+		return func(r *ateapi.RegisterWorkerRequest) { r.Capacity = c }
 	}
 	tests := []struct {
 		name string
@@ -441,11 +920,11 @@ func TestValidateRegisterWorkerRequest(t *testing.T) {
 		name: "valid",
 		req:  valid(),
 	}, {
-		name: "valid empty capacity",
-		req:  valid(func(r *ateapi.RegisterWorkerRequest) { r.Capacity = &ateapi.WorkerResources{} }),
+		name: "valid capacity",
+		req:  valid(withCapacity(&ateapi.WorkerResources{Actors: 10, CpuMillicores: 2000, MemoryBytes: 4 << 30})),
 	}, {
 		name: "valid dual-stack ips",
-		req:  valid(func(r *ateapi.RegisterWorkerRequest) { r.Ips = []string{"fd00::1", "10.1.2.3"} }),
+		req:  valid(withIPs("fd00::1", "10.1.2.3")),
 	}, {
 		name: "missing worker",
 		req:  valid(func(r *ateapi.RegisterWorkerRequest) { r.Worker = nil }),
@@ -474,31 +953,52 @@ func TestValidateRegisterWorkerRequest(t *testing.T) {
 		want: field.ErrorList{field.Invalid(field.NewPath("epoch"), nil, "").WithOrigin("minimum")},
 	}, {
 		name: "missing ips",
-		req:  valid(func(r *ateapi.RegisterWorkerRequest) { r.Ips = nil }),
+		req:  valid(withIPs()),
 		want: field.ErrorList{field.Required(field.NewPath("ips"), "")},
 	}, {
 		name: "invalid ip",
-		req:  valid(func(r *ateapi.RegisterWorkerRequest) { r.Ips = []string{"not-an-ip"} }),
+		req:  valid(withIPs("not-an-ip")),
 		want: field.ErrorList{field.Invalid(field.NewPath("ips").Index(0), nil, "").WithOrigin("format=ip-strict")},
 	}, {
 		name: "two ips in one family",
-		req:  valid(func(r *ateapi.RegisterWorkerRequest) { r.Ips = []string{"10.1.2.3", "10.1.2.4"} }),
+		req:  valid(withIPs("10.1.2.3", "10.1.2.4")),
+		want: field.ErrorList{field.Invalid(field.NewPath("ips").Index(1), nil, "")},
+	}, {
+		// An invalid entry does not claim its family.
+		name: "invalid ip before a valid one",
+		req:  valid(withIPs("not-an-ip", "10.1.2.3")),
+		want: field.ErrorList{field.Invalid(field.NewPath("ips").Index(0), nil, "").WithOrigin("format=ip-strict")},
+	}, {
+		name: "two IPv6 ips",
+		req:  valid(withIPs("fd00::1", "fd00::2")),
 		want: field.ErrorList{field.Invalid(field.NewPath("ips").Index(1), nil, "")},
 	}, {
 		name: "too many ips",
-		req:  valid(func(r *ateapi.RegisterWorkerRequest) { r.Ips = []string{"10.1.2.3", "fd00::1", "10.1.2.4"} }),
+		req:  valid(withIPs("10.1.2.3", "fd00::1", "10.1.2.4")),
 		want: field.ErrorList{field.TooMany(field.NewPath("ips"), 3, 2).WithOrigin("maxItems")},
 	}, {
 		name: "missing capacity",
-		req:  valid(func(r *ateapi.RegisterWorkerRequest) { r.Capacity = nil }),
+		req:  valid(withCapacity(nil)),
 		want: field.ErrorList{field.Required(field.NewPath("capacity"), "")},
 	}, {
 		name: "negative capacity.actors",
-		req:  valid(func(r *ateapi.RegisterWorkerRequest) { r.Capacity.Actors = -1 }),
+		req:  valid(withCapacity(&ateapi.WorkerResources{Actors: -1})),
 		want: field.ErrorList{field.Invalid(field.NewPath("capacity", "actors"), nil, "").WithOrigin("minimum")},
 	}, {
+		name: "negative capacity.cpu_millicores",
+		req:  valid(withCapacity(&ateapi.WorkerResources{CpuMillicores: -1})),
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("capacity", "cpu_millicores"), nil, "").WithOrigin("minimum"),
+		},
+	}, {
+		name: "capacity.cpu_millicores above the maximum",
+		req:  valid(withCapacity(&ateapi.WorkerResources{CpuMillicores: 1000000})),
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("capacity", "cpu_millicores"), nil, "").WithOrigin("maximum"),
+		},
+	}, {
 		name: "negative capacity.memory_bytes",
-		req:  valid(func(r *ateapi.RegisterWorkerRequest) { r.Capacity.MemoryBytes = -1 }),
+		req:  valid(withCapacity(&ateapi.WorkerResources{MemoryBytes: -1})),
 		want: field.ErrorList{field.Invalid(field.NewPath("capacity", "memory_bytes"), nil, "").WithOrigin("minimum")},
 	}}
 	for _, tt := range tests {
@@ -520,11 +1020,15 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		}
 		return r
 	}
-	classesPath := field.NewPath("sandbox_classes")
-	classPath := classesPath.Index(0)
-	defaultRuntimePath := classPath.Child("default_runtime")
-	defaultVersionPath := defaultRuntimePath.Child("version")
-	restorablePath := classPath.Child("restorable_runtimes")
+	withSandboxClasses := func(classes ...*ateapi.WorkerSandboxClass) func(*ateapi.SetWorkerSandboxRuntimesRequest) {
+		return func(r *ateapi.SetWorkerSandboxRuntimesRequest) { r.SandboxClasses = classes }
+	}
+	withRestorableRuntimes := withSandboxClassRestorableRuntimes
+	withActorOverhead := withRuntimeActorOverhead
+	// withAttributes returns a class whose default runtime has attrs.
+	withAttributes := func(attrs ...*ateapi.AttributeEntry) func(*ateapi.WorkerSandboxClass) {
+		return func(c *ateapi.WorkerSandboxClass) { c.DefaultRuntime.Version.Attributes = attrs }
+	}
 	tests := []struct {
 		name string
 		req  *ateapi.SetWorkerSandboxRuntimesRequest
@@ -533,17 +1037,64 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		name: "valid",
 		req:  valid(),
 	}, {
+		name: "valid microvm sandbox class",
+		req:  valid(withSandboxClasses(validSandboxClass(withSandboxClassName("microvm")))),
+	}, {
 		name: "valid with restorable runtimes",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].RestorableRuntimes = []*ateapi.WorkerSandboxRuntime{{
-				Version: &ateapi.VersionedSandboxCompat{
-					SchemaVersion: "v1",
-					Attributes: []*ateapi.AttributeEntry{
-						{Key: "architecture", Value: "amd64"},
-					},
-				},
-			}}
-		}),
+		req:  valid(withSandboxClasses(validSandboxClass(withRestorableRuntimes(sandboxRuntime())))),
+	}, {
+		name: "valid with actor overhead",
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+					c.DefaultRuntime = sandboxRuntime(withActorOverhead(64<<20, 32<<20))
+				}),
+			),
+		),
+	}, {
+		name: "valid with a fixed actor overhead only",
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+					c.DefaultRuntime = sandboxRuntime(withActorOverhead(64<<20, 0))
+				}),
+			),
+		),
+	}, {
+		name: "actor overhead at the bounds",
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+					c.DefaultRuntime = sandboxRuntime(withActorOverhead(1<<40, 1<<30))
+				}),
+			),
+		),
+	}, {
+		name: "negative actor overhead",
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+					c.DefaultRuntime = sandboxRuntime(withActorOverhead(-1, -1))
+				}),
+			),
+		),
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "actor_overhead", "memory_bytes"), nil, "").WithOrigin("minimum"),
+			field.Invalid(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "actor_overhead", "memory_bytes_per_gib"), nil, "").WithOrigin("minimum"),
+		},
+	}, {
+		name: "actor overhead above the maximum",
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+					c.DefaultRuntime = sandboxRuntime(withActorOverhead(1<<40+1, 1<<30+1))
+				}),
+			),
+		),
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "actor_overhead", "memory_bytes"), nil, "").WithOrigin("maximum"),
+			field.Invalid(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "actor_overhead", "memory_bytes_per_gib"), nil, "").WithOrigin("maximum"),
+		},
 	}, {
 		name: "missing worker",
 		req:  valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) { r.Worker = nil }),
@@ -562,243 +1113,190 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		want: field.ErrorList{field.Invalid(field.NewPath("epoch"), nil, "").WithOrigin("minimum")},
 	}, {
 		name: "missing sandbox_classes",
-		req:  valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) { r.SandboxClasses = nil }),
-		want: field.ErrorList{field.Required(classesPath, "")},
+		req:  valid(withSandboxClasses()),
+		want: field.ErrorList{field.Required(field.NewPath("sandbox_classes"), "")},
 	}, {
 		name: "empty sandbox_classes",
 		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
 			r.SandboxClasses = []*ateapi.WorkerSandboxClass{}
 		}),
-		want: field.ErrorList{field.Required(classesPath, "")},
+		want: field.ErrorList{field.Required(field.NewPath("sandbox_classes"), "")},
+	}, {
+		name: "nil sandbox_classes entry",
+		req:  valid(withSandboxClasses(nil)),
+		want: field.ErrorList{field.Required(field.NewPath("sandbox_classes").Index(0), "")},
 	}, {
 		name: "too many sandbox_classes",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			second := validSandboxClass()
-			second.SandboxClass = "microvm"
-			r.SandboxClasses = append(r.SandboxClasses, second)
-		}),
-		want: field.ErrorList{field.TooMany(classesPath, 2, 1).WithOrigin("maxItems")},
+		req:  valid(withSandboxClasses(validSandboxClass(), validSandboxClass(withSandboxClassName("microvm")))),
+		want: field.ErrorList{field.TooMany(field.NewPath("sandbox_classes"), 2, 1).WithOrigin("maxItems")},
 	}, {
 		name: "missing sandbox_classes.sandbox_class",
-		req:  valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) { r.SandboxClasses[0].SandboxClass = "" }),
-		want: field.ErrorList{field.Required(classPath.Child("sandbox_class"), "")},
+		req:  valid(withSandboxClasses(validSandboxClass(withSandboxClassName("")))),
+		want: field.ErrorList{field.Required(field.NewPath("sandbox_classes").Index(0).Child("sandbox_class"), "")},
 	}, {
 		name: "sandbox_classes.sandbox_class too long",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].SandboxClass = strings.Repeat("c", 64)
-		}),
+		req:  valid(withSandboxClasses(validSandboxClass(withSandboxClassName(strings.Repeat("c", 64))))),
 		want: field.ErrorList{
-			field.TooLong(classPath.Child("sandbox_class"), "", 63).WithOrigin("maxLength"),
-			field.NotSupported[string](classPath.Child("sandbox_class"), nil, nil),
+			field.TooLong(field.NewPath("sandbox_classes").Index(0).Child("sandbox_class"), "", 63).WithOrigin("maxLength"),
+			field.NotSupported[string](field.NewPath("sandbox_classes").Index(0).Child("sandbox_class"), nil, nil),
 		},
 	}, {
 		name: "unsupported sandbox_classes.sandbox_class",
-		req:  valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) { r.SandboxClasses[0].SandboxClass = "kata" }),
-		want: field.ErrorList{field.NotSupported[string](classPath.Child("sandbox_class"), nil, nil)},
+		req:  valid(withSandboxClasses(validSandboxClass(withSandboxClassName("kata")))),
+		want: field.ErrorList{
+			field.NotSupported[string](field.NewPath("sandbox_classes").Index(0).Child("sandbox_class"), nil, nil),
+		},
 	}, {
 		name: "missing sandbox_classes.default_runtime",
-		req:  valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) { r.SandboxClasses[0].DefaultRuntime = nil }),
-		want: field.ErrorList{field.Required(defaultRuntimePath, "")},
+		req: valid(
+			withSandboxClasses(validSandboxClass(func(c *ateapi.WorkerSandboxClass) { c.DefaultRuntime = nil })),
+		),
+		want: field.ErrorList{field.Required(field.NewPath("sandbox_classes").Index(0).Child("default_runtime"), "")},
 	}, {
 		name: "missing default_runtime.version",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].DefaultRuntime.Version = nil
-		}),
-		want: field.ErrorList{field.Required(defaultVersionPath, "")},
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+					c.DefaultRuntime.Version = nil
+				}),
+			),
+		),
+		want: field.ErrorList{
+			field.Required(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "version"), ""),
+		},
 	}, {
 		name: "missing default_runtime.schema_version",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].DefaultRuntime.Version.SchemaVersion = ""
-		}),
-		want: field.ErrorList{field.Required(defaultVersionPath.Child("schema_version"), "")},
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+					c.DefaultRuntime.Version.SchemaVersion = ""
+				}),
+			),
+		),
+		want: field.ErrorList{
+			field.Required(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "version", "schema_version"), ""),
+		},
 	}, {
 		name: "default_runtime.schema_version too long",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].DefaultRuntime.Version.SchemaVersion = strings.Repeat("v", 65)
-		}),
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+					c.DefaultRuntime.Version.SchemaVersion = strings.Repeat("v", 65)
+				}),
+			),
+		),
 		want: field.ErrorList{
-			field.TooLong(defaultVersionPath.Child("schema_version"), "", 64).WithOrigin("maxLength"),
+			field.TooLong(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "version", "schema_version"), "", 64).WithOrigin("maxLength"),
 		},
 	}, {
 		name: "missing default_runtime.attributes",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].DefaultRuntime.Version.Attributes = nil
-		}),
-		want: field.ErrorList{field.Required(defaultVersionPath.Child("attributes"), "")},
+		req:  valid(withSandboxClasses(validSandboxClass(withAttributes()))),
+		want: field.ErrorList{
+			field.Required(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "version", "attributes"), ""),
+		},
 	}, {
 		name: "duplicate attribute key",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].DefaultRuntime.Version.Attributes = []*ateapi.AttributeEntry{
-				{Key: "architecture", Value: "amd64"},
-				{Key: "architecture", Value: "arm64"},
-			}
-		}),
-		want: field.ErrorList{field.Duplicate(defaultVersionPath.Child("attributes").Index(1), nil)},
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass(
+					withAttributes(
+						&ateapi.AttributeEntry{Key: "architecture", Value: "amd64"},
+						&ateapi.AttributeEntry{Key: "architecture", Value: "arm64"},
+					),
+				),
+			),
+		),
+		want: field.ErrorList{
+			field.Duplicate(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "version", "attributes").Index(1), nil),
+		},
 	}, {
 		name: "missing attribute key",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].DefaultRuntime.Version.Attributes = []*ateapi.AttributeEntry{{Value: "amd64"}}
-		}),
-		want: field.ErrorList{field.Required(defaultVersionPath.Child("attributes").Index(0).Child("key"), "")},
+		req:  valid(withSandboxClasses(validSandboxClass(withAttributes(&ateapi.AttributeEntry{Value: "amd64"})))),
+		want: field.ErrorList{
+			field.Required(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "version", "attributes").Index(0).Child("key"), ""),
+		},
 	}, {
 		name: "attribute key too long",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].DefaultRuntime.Version.Attributes = []*ateapi.AttributeEntry{{
-				Key:   strings.Repeat("k", 129),
-				Value: "v",
-			}}
-		}),
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass(withAttributes(&ateapi.AttributeEntry{Key: strings.Repeat("k", 129), Value: "v"})),
+			),
+		),
 		want: field.ErrorList{
-			field.TooLong(defaultVersionPath.Child("attributes").Index(0).Child("key"), "", 128).WithOrigin("maxLength"),
+			field.TooLong(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "version", "attributes").Index(0).Child("key"), "", 128).WithOrigin("maxLength"),
 		},
 	}, {
 		name: "missing attribute value",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].DefaultRuntime.Version.Attributes = []*ateapi.AttributeEntry{{Key: "k"}}
-		}),
-		want: field.ErrorList{field.Required(defaultVersionPath.Child("attributes").Index(0).Child("value"), "")},
+		req:  valid(withSandboxClasses(validSandboxClass(withAttributes(&ateapi.AttributeEntry{Key: "k"})))),
+		want: field.ErrorList{
+			field.Required(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "version", "attributes").Index(0).Child("value"), ""),
+		},
 	}, {
 		name: "attribute value too long",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].DefaultRuntime.Version.Attributes = []*ateapi.AttributeEntry{{
-				Key:   "k",
-				Value: strings.Repeat("v", 257),
-			}}
-		}),
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass(withAttributes(&ateapi.AttributeEntry{Key: "k", Value: strings.Repeat("v", 257)})),
+			),
+		),
 		want: field.ErrorList{
-			field.TooLong(defaultVersionPath.Child("attributes").Index(0).Child("value"), "", 256).WithOrigin("maxLength"),
+			field.TooLong(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "version", "attributes").Index(0).Child("value"), "", 256).WithOrigin("maxLength"),
 		},
 	}, {
 		name: "attributes at the bound",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].DefaultRuntime.Version.Attributes = attributeEntries(32)
-		}),
+		req:  valid(withSandboxClasses(validSandboxClass(withAttributes(attributeEntries(32)...)))),
 	}, {
 		name: "too many attributes",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].DefaultRuntime.Version.Attributes = attributeEntries(33)
-		}),
-		want: field.ErrorList{field.TooMany(defaultVersionPath.Child("attributes"), 33, 32).WithOrigin("maxItems")},
+		req:  valid(withSandboxClasses(validSandboxClass(withAttributes(attributeEntries(33)...)))),
+		want: field.ErrorList{
+			field.TooMany(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "version", "attributes"), 33, 32).WithOrigin("maxItems"),
+		},
 	}, {
 		name: "nil restorable_runtimes entry",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].RestorableRuntimes = []*ateapi.WorkerSandboxRuntime{nil}
-		}),
-		want: field.ErrorList{field.Required(restorablePath.Index(0), "")},
+		req:  valid(withSandboxClasses(validSandboxClass(withRestorableRuntimes(nil)))),
+		want: field.ErrorList{
+			field.Required(field.NewPath("sandbox_classes").Index(0).Child("restorable_runtimes").Index(0), ""),
+		},
 	}, {
 		name: "invalid restorable_runtimes entry",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].RestorableRuntimes = []*ateapi.WorkerSandboxRuntime{{
-				Version: &ateapi.VersionedSandboxCompat{Attributes: attributeEntries(1)},
-			}}
-		}),
-		want: field.ErrorList{field.Required(restorablePath.Index(0).Child("version", "schema_version"), "")},
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass(
+					withRestorableRuntimes(
+						sandboxRuntime(func(r *ateapi.WorkerSandboxRuntime) {
+							r.Version.SchemaVersion = ""
+						}),
+					),
+				),
+			),
+		),
+		want: field.ErrorList{
+			field.Required(field.NewPath("sandbox_classes").Index(0).Child("restorable_runtimes").Index(0).Child("version", "schema_version"), ""),
+		},
 	}, {
 		name: "restorable_runtimes entry without a version",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].RestorableRuntimes = []*ateapi.WorkerSandboxRuntime{{}}
-		}),
-		want: field.ErrorList{field.Required(restorablePath.Index(0).Child("version"), "")},
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass(
+					withRestorableRuntimes(sandboxRuntime(func(r *ateapi.WorkerSandboxRuntime) { r.Version = nil })),
+				),
+			),
+		),
+		want: field.ErrorList{
+			field.Required(field.NewPath("sandbox_classes").Index(0).Child("restorable_runtimes").Index(0).Child("version"), ""),
+		},
 	}, {
 		name: "restorable_runtimes at the bound",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].RestorableRuntimes = sandboxRuntimes(32)
-		}),
+		req:  valid(withSandboxClasses(validSandboxClass(withRestorableRuntimes(sandboxRuntimes(32)...)))),
 	}, {
 		name: "too many restorable_runtimes",
-		req: valid(func(r *ateapi.SetWorkerSandboxRuntimesRequest) {
-			r.SandboxClasses[0].RestorableRuntimes = sandboxRuntimes(33)
-		}),
-		want: field.ErrorList{field.TooMany(restorablePath, 33, 32).WithOrigin("maxItems")},
+		req:  valid(withSandboxClasses(validSandboxClass(withRestorableRuntimes(sandboxRuntimes(33)...)))),
+		want: field.ErrorList{
+			field.TooMany(field.NewPath("sandbox_classes").Index(0).Child("restorable_runtimes"), 33, 32).WithOrigin("maxItems"),
+		},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assertValidateErr(t, ValidateSetWorkerSandboxRuntimesRequest(context.Background(), tt.req), tt.want)
-		})
-	}
-}
-
-// TestValidateWorkerUpdate_SandboxClasses pins the status-side checks on the
-// sandbox classes SetWorkerSandboxRuntimes records. They reach the store as
-// status, which no request validator sees, so ValidateWorkerUpdate is the only
-// check on them. The old worker already reports a class so that every
-// mutation, clearing the list included, differs from it and is validated.
-func TestValidateWorkerUpdate_SandboxClasses(t *testing.T) {
-	classesPath := field.NewPath("worker", "status", "sandbox_classes")
-	classPath := classesPath.Index(0)
-	oldVal := validWorker(apiWorkerName, withWorkerStatus(func(s *ateapi.WorkerStatus) {
-		s.SandboxClasses = []*ateapi.WorkerSandboxClass{validSandboxClass()}
-	}))
-	tests := []struct {
-		name   string
-		mutate func(s *ateapi.WorkerStatus)
-		want   field.ErrorList
-	}{{
-		name: "valid runtimes",
-		mutate: func(s *ateapi.WorkerStatus) {
-			s.SandboxClasses[0].RestorableRuntimes = sandboxRuntimes(32)
-		},
-	}, {
-		name:   "empty sandbox_classes",
-		mutate: func(s *ateapi.WorkerStatus) { s.SandboxClasses = []*ateapi.WorkerSandboxClass{} },
-	}, {
-		name: "too many sandbox_classes",
-		mutate: func(s *ateapi.WorkerStatus) {
-			second := validSandboxClass()
-			second.SandboxClass = "microvm"
-			s.SandboxClasses = append(s.SandboxClasses, second)
-		},
-		want: field.ErrorList{field.TooMany(classesPath, 2, 1).WithOrigin("maxItems")},
-	}, {
-		name:   "missing sandbox_classes.sandbox_class",
-		mutate: func(s *ateapi.WorkerStatus) { s.SandboxClasses[0].SandboxClass = "" },
-		want:   field.ErrorList{field.Required(classPath.Child("sandbox_class"), "")},
-	}, {
-		name:   "unsupported sandbox_classes.sandbox_class",
-		mutate: func(s *ateapi.WorkerStatus) { s.SandboxClasses[0].SandboxClass = "kata" },
-		want:   field.ErrorList{field.NotSupported[string](classPath.Child("sandbox_class"), nil, nil)},
-	}, {
-		name:   "missing sandbox_classes.default_runtime",
-		mutate: func(s *ateapi.WorkerStatus) { s.SandboxClasses[0].DefaultRuntime = nil },
-		want:   field.ErrorList{field.Required(classPath.Child("default_runtime"), "")},
-	}, {
-		name:   "missing sandbox_classes.default_runtime.version",
-		mutate: func(s *ateapi.WorkerStatus) { s.SandboxClasses[0].DefaultRuntime.Version = nil },
-		want:   field.ErrorList{field.Required(classPath.Child("default_runtime", "version"), "")},
-	}, {
-		name: "too many default_runtime attributes",
-		mutate: func(s *ateapi.WorkerStatus) {
-			s.SandboxClasses[0].DefaultRuntime.Version.Attributes = attributeEntries(33)
-		},
-		want: field.ErrorList{
-			field.TooMany(classPath.Child("default_runtime", "version", "attributes"), 33, 32).WithOrigin("maxItems"),
-		},
-	}, {
-		name: "invalid restorable_runtimes entry",
-		mutate: func(s *ateapi.WorkerStatus) {
-			s.SandboxClasses[0].RestorableRuntimes = []*ateapi.WorkerSandboxRuntime{{
-				Version: &ateapi.VersionedSandboxCompat{Attributes: attributeEntries(1)},
-			}}
-		},
-		want: field.ErrorList{
-			field.Required(classPath.Child("restorable_runtimes").Index(0).Child("version", "schema_version"), ""),
-		},
-	}, {
-		name: "too many restorable_runtimes",
-		mutate: func(s *ateapi.WorkerStatus) {
-			s.SandboxClasses[0].RestorableRuntimes = sandboxRuntimes(33)
-		},
-		want: field.ErrorList{field.TooMany(classPath.Child("restorable_runtimes"), 33, 32).WithOrigin("maxItems")},
-	}}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			newVal := proto.Clone(oldVal).(*ateapi.Worker)
-			tt.mutate(newVal.Status)
-			assertValidateErr(
-				t,
-				ValidateWorkerUpdate(context.Background(), field.NewPath("worker"), newVal, oldVal, true),
-				tt.want,
-			)
 		})
 	}
 }
@@ -881,34 +1379,45 @@ func TestValidateRequestActorSuspendRequest(t *testing.T) {
 }
 
 func TestValidateReportActorSnapshotStateRequest(t *testing.T) {
-	report := func(gen int32) *ateapi.SnapshotReport {
-		return &ateapi.SnapshotReport{
-			Uuid:            fmt.Sprintf("snap-%d", gen),
-			Generation:      gen,
-			Fidelity:        ateapi.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY,
-			Object:          &ateapi.ObjectSnapshot{SnapshotUri: fmt.Sprintf("gs://bucket/actors/a/snap-%d", gen)},
-			LocalCommitTime: timestamppb.Now(),
+	// report returns a SnapshotReport with only its required fields set.
+	report := func(gen int32, mods ...func(*ateapi.SnapshotReport)) *ateapi.SnapshotReport {
+		sr := &ateapi.SnapshotReport{
+			Uuid:       fmt.Sprintf("snap-%d", gen),
+			Generation: gen,
+			Fidelity:   ateapi.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY,
+			Object:     &ateapi.ObjectSnapshot{SnapshotUri: fmt.Sprintf("gs://bucket/actors/a/snap-%d", gen)},
 		}
+		for _, m := range mods {
+			m(sr)
+		}
+		return sr
 	}
+	committed := func(sr *ateapi.SnapshotReport) { sr.LocalCommitTime = timestamppb.Now() }
+	durable := func(sr *ateapi.SnapshotReport) { sr.DurableCompleteTime = timestamppb.Now() }
+	// valid returns the smallest valid request. A state with neither
+	// latest_local nor uploading must set latest_durable, so that is the one
+	// report it carries. The with* modifiers below fill in the rest.
 	valid := func(mutate ...func(*ateapi.ReportActorSnapshotStateRequest)) *ateapi.ReportActorSnapshotStateRequest {
-		durable := report(1)
-		durable.DurableCompleteTime = timestamppb.Now()
 		r := &ateapi.ReportActorSnapshotStateRequest{
 			Actor:    &ateapi.ObjectRef{Atespace: "team-a", Name: "actor-1"},
 			ActorUid: apiOtherWorkerName,
-			State: &ateapi.ActorSnapshotState{
-				LatestLocal:   report(2),
-				Uploading:     report(2),
-				LatestDurable: durable,
-				UploadDueTime: timestamppb.Now(),
-			},
+			State:    &ateapi.ActorSnapshotState{LatestDurable: report(1)},
 		}
 		for _, m := range mutate {
 			m(r)
 		}
 		return r
 	}
-	local := field.NewPath("state", "latest_local")
+	withLatestLocal := func(mods ...func(*ateapi.SnapshotReport)) func(*ateapi.ReportActorSnapshotStateRequest) {
+		return func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal = report(2, mods...) }
+	}
+	withUploading := func(mods ...func(*ateapi.SnapshotReport)) func(*ateapi.ReportActorSnapshotStateRequest) {
+		return func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.Uploading = report(2, mods...) }
+	}
+	withLatestDurable := func(mods ...func(*ateapi.SnapshotReport)) func(*ateapi.ReportActorSnapshotStateRequest) {
+		return func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestDurable = report(1, mods...) }
+	}
+	withUploadDueTime := func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.UploadDueTime = timestamppb.Now() }
 	tests := []struct {
 		name string
 		req  *ateapi.ReportActorSnapshotStateRequest
@@ -917,12 +1426,16 @@ func TestValidateReportActorSnapshotStateRequest(t *testing.T) {
 		name: "valid",
 		req:  valid(),
 	}, {
+		name: "valid with every field",
+		req: valid(
+			withLatestLocal(committed),
+			withUploading(committed),
+			withLatestDurable(committed, durable),
+			withUploadDueTime,
+		),
+	}, {
 		name: "valid detach: no local snapshot",
-		req: valid(func(r *ateapi.ReportActorSnapshotStateRequest) {
-			r.State.LatestLocal = nil
-			r.State.Uploading = nil
-			r.State.UploadDueTime = nil
-		}),
+		req:  valid(withLatestDurable(committed, durable)),
 	}, {
 		name: "empty state",
 		req:  valid(func(r *ateapi.ReportActorSnapshotStateRequest) { r.State = &ateapi.ActorSnapshotState{} }),
@@ -930,8 +1443,15 @@ func TestValidateReportActorSnapshotStateRequest(t *testing.T) {
 	}, {
 		name: "valid upload in flight with no local snapshot",
 		req: valid(func(r *ateapi.ReportActorSnapshotStateRequest) {
-			r.State = &ateapi.ActorSnapshotState{Uploading: r.State.GetUploading()}
-		}),
+			r.State = &ateapi.ActorSnapshotState{}
+		}, withUploading(committed)),
+	}, {
+		// Only a report with no local snapshot and no upload must name a
+		// durable one.
+		name: "valid with only a local snapshot",
+		req: valid(func(r *ateapi.ReportActorSnapshotStateRequest) {
+			r.State = &ateapi.ActorSnapshotState{}
+		}, withLatestLocal(committed)),
 	}, {
 		name: "missing actor",
 		req:  valid(func(r *ateapi.ReportActorSnapshotStateRequest) { r.Actor = nil }),
@@ -960,44 +1480,93 @@ func TestValidateReportActorSnapshotStateRequest(t *testing.T) {
 		want: field.ErrorList{field.Required(field.NewPath("state"), "")},
 	}, {
 		name: "missing uuid",
-		req:  valid(func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal.Uuid = "" }),
-		want: field.ErrorList{field.Required(local.Child("uuid"), "")},
+		req: valid(
+			withLatestLocal(committed),
+			func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal.Uuid = "" },
+		),
+		want: field.ErrorList{field.Required(field.NewPath("state", "latest_local", "uuid"), "")},
 	}, {
 		name: "invalid uuid",
-		req:  valid(func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal.Uuid = "../escape" }),
-		want: field.ErrorList{field.Invalid(local.Child("uuid"), nil, "").WithOrigin("format=k8s-short-name")},
+		req: valid(
+			withLatestLocal(committed),
+			func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal.Uuid = "../escape" },
+		),
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("state", "latest_local", "uuid"), nil, "").WithOrigin("format=k8s-short-name"),
+		},
 	}, {
 		name: "generation below 1",
-		req:  valid(func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal.Generation = -1 }),
-		want: field.ErrorList{field.Invalid(local.Child("generation"), nil, "").WithOrigin("minimum")},
+		req: valid(
+			withLatestLocal(committed),
+			func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal.Generation = -1 },
+		),
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("state", "latest_local", "generation"), nil, "").WithOrigin("minimum"),
+		},
 	}, {
 		name: "missing fidelity",
-		req: valid(func(r *ateapi.ReportActorSnapshotStateRequest) {
-			r.State.LatestLocal.Fidelity = ateapi.SnapshotFidelity_SNAPSHOT_FIDELITY_UNSPECIFIED
-		}),
-		want: field.ErrorList{field.Required(local.Child("fidelity"), "")},
+		req: valid(
+			withLatestLocal(committed),
+			func(r *ateapi.ReportActorSnapshotStateRequest) {
+				r.State.LatestLocal.Fidelity = ateapi.SnapshotFidelity_SNAPSHOT_FIDELITY_UNSPECIFIED
+			},
+		),
+		want: field.ErrorList{field.Required(field.NewPath("state", "latest_local", "fidelity"), "")},
+	}, {
+		name: "missing generation",
+		req: valid(
+			withLatestLocal(committed),
+			func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal.Generation = 0 },
+		),
+		want: field.ErrorList{field.Required(field.NewPath("state", "latest_local", "generation"), "")},
+	}, {
+		name: "negative fidelity",
+		req: valid(
+			withLatestLocal(committed),
+			func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal.Fidelity = -1 },
+		),
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("state", "latest_local", "fidelity"), nil, "").WithOrigin("minimum"),
+		},
 	}, {
 		name: "unknown fidelity",
-		req:  valid(func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal.Fidelity = 4 }),
-		want: field.ErrorList{field.Invalid(local.Child("fidelity"), nil, "").WithOrigin("maximum")},
+		req: valid(
+			withLatestLocal(committed),
+			func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal.Fidelity = 4 },
+		),
+		want: field.ErrorList{
+			field.Invalid(field.NewPath("state", "latest_local", "fidelity"), nil, "").WithOrigin("maximum"),
+		},
 	}, {
 		name: "missing object",
-		req:  valid(func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal.Object = nil }),
-		want: field.ErrorList{field.Required(local.Child("object"), "")},
+		req: valid(
+			withLatestLocal(committed),
+			func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal.Object = nil },
+		),
+		want: field.ErrorList{field.Required(field.NewPath("state", "latest_local", "object"), "")},
 	}, {
 		name: "missing object.snapshot_uri",
-		req:  valid(func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal.Object.SnapshotUri = "" }),
-		want: field.ErrorList{field.Required(local.Child("object", "snapshot_uri"), "")},
+		req: valid(
+			withLatestLocal(committed),
+			func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestLocal.Object.SnapshotUri = "" },
+		),
+		want: field.ErrorList{field.Required(field.NewPath("state", "latest_local", "object", "snapshot_uri"), "")},
 	}, {
 		name: "valid without local_commit_time",
-		req:  valid(func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestDurable.LocalCommitTime = nil }),
+		req:  valid(withLatestDurable(durable)),
 	}, {
 		name: "uploading is validated",
-		req:  valid(func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.Uploading.Uuid = "" }),
+		req: valid(
+			withUploading(committed),
+			func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.Uploading.Uuid = "" },
+		),
 		want: field.ErrorList{field.Required(field.NewPath("state", "uploading", "uuid"), "")},
 	}, {
 		name: "latest_durable is validated",
-		req:  valid(func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestDurable.Object = nil }),
+		req: valid(
+			withLatestDurable(committed, durable),
+			func(r *ateapi.ReportActorSnapshotStateRequest) { r.State.LatestDurable.Object = nil },
+		),
 		want: field.ErrorList{field.Required(field.NewPath("state", "latest_durable", "object"), "")},
 	}}
 	for _, tt := range tests {
@@ -1007,8 +1576,72 @@ func TestValidateReportActorSnapshotStateRequest(t *testing.T) {
 	}
 }
 
-// validWorker returns a Worker in the shape CreateWorker accepts: named, with
-// its pod coordinates filled in and no status — status is output-only.
+func TestValidateReportActorCrashedRequest(t *testing.T) {
+	valid := func(mutate ...func(*ateapi.ReportActorCrashedRequest)) *ateapi.ReportActorCrashedRequest {
+		r := &ateapi.ReportActorCrashedRequest{
+			Worker:   workerRef(apiWorkerName),
+			Actor:    &ateapi.ObjectRef{Atespace: "team-a", Name: "actor-1"},
+			ActorUid: apiOtherWorkerName,
+			Message:  "container main exited with status 137",
+		}
+		for _, m := range mutate {
+			m(r)
+		}
+		return r
+	}
+	tests := []struct {
+		name string
+		req  *ateapi.ReportActorCrashedRequest
+		want field.ErrorList
+	}{{
+		name: "valid",
+		req:  valid(),
+	}, {
+		name: "missing worker",
+		req:  valid(func(r *ateapi.ReportActorCrashedRequest) { r.Worker = nil }),
+		want: field.ErrorList{field.Required(field.NewPath("worker"), "")},
+	}, {
+		name: "worker.atespace must be empty",
+		req:  valid(func(r *ateapi.ReportActorCrashedRequest) { r.Worker.Atespace = "team-a" }),
+		want: field.ErrorList{field.Forbidden(field.NewPath("worker", "atespace"), "")},
+	}, {
+		name: "missing actor",
+		req:  valid(func(r *ateapi.ReportActorCrashedRequest) { r.Actor = nil }),
+		want: field.ErrorList{field.Required(field.NewPath("actor"), "")},
+	}, {
+		name: "missing actor.atespace",
+		req:  valid(func(r *ateapi.ReportActorCrashedRequest) { r.Actor.Atespace = "" }),
+		want: field.ErrorList{field.Required(field.NewPath("actor", "atespace"), "")},
+	}, {
+		name: "missing actor_uid",
+		req:  valid(func(r *ateapi.ReportActorCrashedRequest) { r.ActorUid = "" }),
+		want: field.ErrorList{field.Required(field.NewPath("actor_uid"), "")},
+	}, {
+		name: "invalid actor_uid",
+		req:  valid(func(r *ateapi.ReportActorCrashedRequest) { r.ActorUid = "not-a-uuid" }),
+		want: field.ErrorList{field.Invalid(field.NewPath("actor_uid"), nil, "").WithOrigin("format=k8s-uuid")},
+	}, {
+		name: "missing message",
+		req:  valid(func(r *ateapi.ReportActorCrashedRequest) { r.Message = "" }),
+		want: field.ErrorList{field.Required(field.NewPath("message"), "")},
+	}, {
+		name: "message at the limit",
+		req:  valid(func(r *ateapi.ReportActorCrashedRequest) { r.Message = strings.Repeat("x", 4096) }),
+	}, {
+		name: "message too long",
+		req:  valid(func(r *ateapi.ReportActorCrashedRequest) { r.Message = strings.Repeat("x", 4097) }),
+		want: field.ErrorList{field.TooLong(field.NewPath("message"), "", 4096).WithOrigin("maxLength")},
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertValidateErr(t, ValidateReportActorCrashedRequest(context.Background(), tt.req), tt.want)
+		})
+	}
+}
+
+// validWorker returns a Worker with only its required fields set: named, with
+// its pod coordinates filled in. The withWorker* modifiers set the optional
+// fields.
 func validWorker(name string, mods ...func(*ateapi.Worker)) *ateapi.Worker {
 	w := &ateapi.Worker{
 		Metadata:        &ateapi.ResourceMetadata{Name: name},
@@ -1024,35 +1657,116 @@ func validWorker(name string, mods ...func(*ateapi.Worker)) *ateapi.Worker {
 	return w
 }
 
-// withWorkerMetadata returns a modifier func (see validWorker) which sets
-// the worker's resource metadata to a valid value.
-func withWorkerMetadata(mutate func(*ateapi.ResourceMetadata)) func(*ateapi.Worker) {
-	return func(a *ateapi.Worker) { mutate(a.Metadata) }
+// withWorkerMetadata returns a modifier func (see validWorker) which applies
+// mods to the worker's metadata.
+func withWorkerMetadata(mods ...func(*ateapi.ResourceMetadata)) func(*ateapi.Worker) {
+	return func(w *ateapi.Worker) {
+		for _, m := range mods {
+			m(w.Metadata)
+		}
+	}
+}
+
+// withWorkerSpiffeID returns a modifier func (see validWorker) which sets the
+// worker_spiffe_id.
+func withWorkerSpiffeID(id string) func(*ateapi.Worker) {
+	return func(w *ateapi.Worker) { w.WorkerSpiffeId = id }
+}
+
+// withWorkerLabels returns a modifier func (see validWorker) which sets the
+// labels.
+func withWorkerLabels(labels map[string]string) func(*ateapi.Worker) {
+	return func(w *ateapi.Worker) { w.Labels = labels }
 }
 
 // withWorkerStatus returns a modifier func (see validWorker) which sets the
-// actor's status to a valid value.
+// worker's status to a valid value with only its required state, and applies
+// mods to it.
 func withWorkerStatus(mods ...func(*ateapi.WorkerStatus)) func(*ateapi.Worker) {
-	return func(a *ateapi.Worker) {
-		a.Status = &ateapi.WorkerStatus{
+	return func(w *ateapi.Worker) {
+		w.Status = &ateapi.WorkerStatus{
 			State: ateapi.WorkerState_WORKER_STATE_ACTIVE,
 		}
 		for _, m := range mods {
-			m(a.Status)
+			m(w.Status)
 		}
 	}
+}
+
+// withWorkerStatusState returns a modifier func (see withWorkerStatus) which
+// sets the state.
+func withWorkerStatusState(state ateapi.WorkerState) func(*ateapi.WorkerStatus) {
+	return func(s *ateapi.WorkerStatus) { s.State = state }
+}
+
+// withWorkerStatusIPs returns a modifier func (see withWorkerStatus) which
+// sets the ips.
+func withWorkerStatusIPs(ips ...string) func(*ateapi.WorkerStatus) {
+	return func(s *ateapi.WorkerStatus) { s.Ips = ips }
+}
+
+// withWorkerStatusCapacity returns a modifier func (see withWorkerStatus)
+// which sets the capacity.
+func withWorkerStatusCapacity(capacity *ateapi.WorkerResources) func(*ateapi.WorkerStatus) {
+	return func(s *ateapi.WorkerStatus) { s.Capacity = capacity }
+}
+
+// withWorkerStatusAllocated returns a modifier func (see withWorkerStatus)
+// which sets the allocated resources.
+func withWorkerStatusAllocated(allocated *ateapi.WorkerResources) func(*ateapi.WorkerStatus) {
+	return func(s *ateapi.WorkerStatus) { s.Allocated = allocated }
+}
+
+// withWorkerStatusSandboxClasses returns a modifier func (see
+// withWorkerStatus) which sets the sandbox_classes.
+func withWorkerStatusSandboxClasses(classes ...*ateapi.WorkerSandboxClass) func(*ateapi.WorkerStatus) {
+	return func(s *ateapi.WorkerStatus) { s.SandboxClasses = classes }
 }
 
 func workerRef(name string) *ateapi.ObjectRef {
 	return &ateapi.ObjectRef{Name: name}
 }
 
-// validSandboxClass returns a WorkerSandboxClass in the shape RegisterWorker
-// accepts: a sandbox class and a default runtime, with nothing restorable.
-func validSandboxClass() *ateapi.WorkerSandboxClass {
-	return &ateapi.WorkerSandboxClass{
+// validSandboxClass returns a gvisor WorkerSandboxClass with only its required
+// default runtime. The withSandboxClass* modifiers set the rest.
+func validSandboxClass(mods ...func(*ateapi.WorkerSandboxClass)) *ateapi.WorkerSandboxClass {
+	c := &ateapi.WorkerSandboxClass{
 		SandboxClass:   "gvisor",
-		DefaultRuntime: &ateapi.WorkerSandboxRuntime{Version: validSandboxCompat()},
+		DefaultRuntime: sandboxRuntime(),
+	}
+	for _, m := range mods {
+		m(c)
+	}
+	return c
+}
+
+// withSandboxClassName returns a modifier func (see validSandboxClass) which
+// sets the sandbox_class.
+func withSandboxClassName(class string) func(*ateapi.WorkerSandboxClass) {
+	return func(c *ateapi.WorkerSandboxClass) { c.SandboxClass = class }
+}
+
+// withSandboxClassRestorableRuntimes returns a modifier func (see
+// validSandboxClass) which sets the restorable_runtimes.
+func withSandboxClassRestorableRuntimes(runtimes ...*ateapi.WorkerSandboxRuntime) func(*ateapi.WorkerSandboxClass) {
+	return func(c *ateapi.WorkerSandboxClass) { c.RestorableRuntimes = runtimes }
+}
+
+// sandboxRuntime returns a WorkerSandboxRuntime with only its required
+// version, and applies mods to it.
+func sandboxRuntime(mods ...func(*ateapi.WorkerSandboxRuntime)) *ateapi.WorkerSandboxRuntime {
+	r := &ateapi.WorkerSandboxRuntime{Version: validSandboxCompat()}
+	for _, m := range mods {
+		m(r)
+	}
+	return r
+}
+
+// withRuntimeActorOverhead returns a modifier func (see sandboxRuntime) which
+// sets the actor_overhead.
+func withRuntimeActorOverhead(memoryBytes, memoryBytesPerGiB int64) func(*ateapi.WorkerSandboxRuntime) {
+	return func(r *ateapi.WorkerSandboxRuntime) {
+		r.ActorOverhead = &ateapi.RuntimeOverhead{MemoryBytes: memoryBytes, MemoryBytesPerGib: memoryBytesPerGiB}
 	}
 }
 
@@ -1077,7 +1791,7 @@ func attributeEntries(n int) []*ateapi.AttributeEntry {
 func sandboxRuntimes(n int) []*ateapi.WorkerSandboxRuntime {
 	runtimes := make([]*ateapi.WorkerSandboxRuntime, n)
 	for i := range runtimes {
-		runtimes[i] = &ateapi.WorkerSandboxRuntime{Version: validSandboxCompat()}
+		runtimes[i] = sandboxRuntime()
 	}
 	return runtimes
 }
