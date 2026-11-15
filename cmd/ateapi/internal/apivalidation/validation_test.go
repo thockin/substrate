@@ -68,6 +68,12 @@ func withMetadataCreateTime() func(*ateapi.ResourceMetadata) {
 	return func(rm *ateapi.ResourceMetadata) { rm.CreateTime = &timestamppb.Timestamp{Seconds: 867} }
 }
 
+// withMetadataDeleteTime returns a modifier func (see validResourceMetadata)
+// which sets the delete_time to a valid value, after withMetadataCreateTime's.
+func withMetadataDeleteTime() func(*ateapi.ResourceMetadata) {
+	return func(rm *ateapi.ResourceMetadata) { rm.DeleteTime = &timestamppb.Timestamp{Seconds: 6000} }
+}
+
 // withMetadataUpdateTime returns a modifier func (see validResourceMetadata)
 // which sets the update_time to a valid value, after withMetadataCreateTime's.
 func withMetadataUpdateTime() func(*ateapi.ResourceMetadata) {
@@ -156,6 +162,7 @@ func TestValidateResourceMetadataCreate(t *testing.T) {
 }
 
 func TestValidateResourceMetadataUpdate(t *testing.T) {
+	withDeleteTime := withMetadataDeleteTime
 	withUID := withMetadataUID
 	withVersion := withMetadataVersion
 	withCreateTime := withMetadataCreateTime
@@ -286,6 +293,15 @@ func TestValidateResourceMetadataUpdate(t *testing.T) {
 			func(rm *ateapi.ResourceMetadata) { rm.UpdateTime.Seconds = 866 },
 		),
 		want: field.ErrorList{field.Invalid(field.NewPath("update_time"), nil, "")},
+	}, {
+		name:   "delete_time: set",
+		oldObj: valid(withCreateTime()),
+		newObj: valid(withCreateTime(), withDeleteTime()),
+	}, {
+		name:   "delete_time: unset",
+		oldObj: valid(withCreateTime(), withDeleteTime()),
+		newObj: valid(withCreateTime()),
+		want:   field.ErrorList{field.Invalid(field.NewPath("delete_time"), nil, "").WithOrigin("update")},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -868,6 +884,11 @@ func TestValidateSnapshot(t *testing.T) {
 			name: "missing owner",
 			obj:  valid(func(s *ateapi.Snapshot) { s.Owner = ateapi.SnapshotOwner_SNAPSHOT_OWNER_UNSPECIFIED }),
 			want: field.ErrorList{field.Required(ownerPath, "")},
+		},
+		{
+			name: "negative owner",
+			obj:  valid(func(s *ateapi.Snapshot) { s.Owner = ateapi.SnapshotOwner(-1) }),
+			want: field.ErrorList{field.Invalid(ownerPath, nil, "").WithOrigin("minimum")},
 		},
 		{
 			name: "owner above the enum",
