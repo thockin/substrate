@@ -44,6 +44,12 @@ func withMetadataAtespace(atespace string) func(*ateapi.ResourceMetadata) {
 	return func(rm *ateapi.ResourceMetadata) { rm.Atespace = atespace }
 }
 
+// withMetadataName returns a modifier func (see validResourceMetadata) which
+// sets the name.
+func withMetadataName(name string) func(*ateapi.ResourceMetadata) {
+	return func(rm *ateapi.ResourceMetadata) { rm.Name = name }
+}
+
 // withMetadataUID returns a modifier func (see validResourceMetadata) which
 // sets the uid to a valid value.
 func withMetadataUID() func(*ateapi.ResourceMetadata) {

@@ -89,6 +89,11 @@ func ports(nums ...int32) *ateapi.Ports {
 	return &ateapi.Ports{Numbers: nums}
 }
 
+// allPorts returns Ports matching every port.
+func allPorts() *ateapi.Ports {
+	return &ateapi.Ports{All: &ateapi.AllPorts{}}
+}
+
 // numberedHTTPRules returns n HTTP rules, each for a distinct hostname.
 func numberedHTTPRules(n int) []*ateapi.EgressRule {
 	rules := make([]*ateapi.EgressRule, n)
@@ -108,4 +113,46 @@ func combine[T any](mods ...func(T)) func(T) {
 			m(obj)
 		}
 	}
+}
+
+// actorRefGetter is a request that names an Actor.
+type actorRefGetter interface {
+	GetActor() *ateapi.ObjectRef
+}
+
+// withRequestActor returns a modifier func for a request of type T which
+// applies mods to its actor ref. Instantiate it per request type, as in
+// withRequestActor[*ateapi.GetActorEgressPolicyRequest].
+func withRequestActor[T actorRefGetter](mods ...func(*ateapi.ObjectRef)) func(T) {
+	return func(r T) {
+		for _, m := range mods {
+			m(r.GetActor())
+		}
+	}
+}
+
+// egressPolicyGetter is a request that carries an EgressPolicy.
+type egressPolicyGetter interface {
+	GetEgressPolicy() *ateapi.EgressPolicy
+}
+
+// withRequestEgressPolicy returns a modifier func for a request of type T
+// which applies mods to its egress policy.
+func withRequestEgressPolicy[T egressPolicyGetter](mods ...func(*ateapi.EgressPolicy)) func(T) {
+	return func(r T) {
+		for _, m := range mods {
+			m(r.GetEgressPolicy())
+		}
+	}
+}
+
+// withObjectRefAtespace returns a modifier func which sets an ObjectRef's
+// atespace.
+func withObjectRefAtespace(atespace string) func(*ateapi.ObjectRef) {
+	return func(ref *ateapi.ObjectRef) { ref.Atespace = atespace }
+}
+
+// withObjectRefName returns a modifier func which sets an ObjectRef's name.
+func withObjectRefName(name string) func(*ateapi.ObjectRef) {
+	return func(ref *ateapi.ObjectRef) { ref.Name = name }
 }
