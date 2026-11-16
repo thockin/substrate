@@ -29,6 +29,11 @@ import (
 )
 
 func TestValidateCreateActorTemplateRequest(t *testing.T) {
+	withGoldenEgressPolicy := withActorTemplateGoldenEgressPolicy
+	withHTTPRule := withEgressPolicyTemplateHTTPRule
+	withMultipleHTTPRules := withEgressPolicyTemplateMultipleHTTPRules
+	withHTTPSRule := withEgressPolicyTemplateHTTPSRule
+	withTLSPassthroughRule := withEgressPolicyTemplateTLSPassthroughRule
 	tests := []struct {
 		name string
 		req  *ateapi.CreateActorTemplateRequest
@@ -40,47 +45,32 @@ func TestValidateCreateActorTemplateRequest(t *testing.T) {
 	}, {
 		"valid golden egress rules",
 		&ateapi.CreateActorTemplateRequest{
-			ActorTemplate: validActorTemplate(func(tmpl *ateapi.ActorTemplate) {
-				tmpl.GoldenEgressPolicy = &ateapi.EgressPolicyTemplate{
-					Rules: []*ateapi.EgressRule{{
-						Http: &ateapi.HttpRule{
-							Hostnames: []string{"api.example.com"},
-							Ports:     &ateapi.Ports{Numbers: []int32{80}},
-						},
-					}},
-				}
-			}),
+			ActorTemplate: validActorTemplate(
+				withGoldenEgressPolicy(
+					withHTTPRule(hostnames("api.example.com"), ports(80)))),
 		},
 		nil,
 	}, {
 		"missing golden egress rules",
 		&ateapi.CreateActorTemplateRequest{
-			ActorTemplate: validActorTemplate(func(tmpl *ateapi.ActorTemplate) {
-				tmpl.GoldenEgressPolicy = &ateapi.EgressPolicyTemplate{}
-			}),
+			ActorTemplate: validActorTemplate(withGoldenEgressPolicy()),
 		},
 		field.ErrorList{field.Required(field.NewPath("actor_template", "golden_egress_policy", "rules"), "")},
 	}, {
 		"empty golden egress rules",
 		&ateapi.CreateActorTemplateRequest{
-			ActorTemplate: validActorTemplate(func(tmpl *ateapi.ActorTemplate) {
-				tmpl.GoldenEgressPolicy = &ateapi.EgressPolicyTemplate{Rules: []*ateapi.EgressRule{}}
-			}),
+			ActorTemplate: validActorTemplate(
+				withGoldenEgressPolicy(func(policy *ateapi.EgressPolicyTemplate) {
+					policy.Rules = []*ateapi.EgressRule{}
+				})),
 		},
 		field.ErrorList{field.Required(field.NewPath("actor_template", "golden_egress_policy", "rules"), "")},
 	}, {
 		"invalid golden egress hostname",
 		&ateapi.CreateActorTemplateRequest{
-			ActorTemplate: validActorTemplate(func(tmpl *ateapi.ActorTemplate) {
-				tmpl.GoldenEgressPolicy = &ateapi.EgressPolicyTemplate{
-					Rules: []*ateapi.EgressRule{{
-						Http: &ateapi.HttpRule{
-							Hostnames: []string{"bad/host"},
-							Ports:     &ateapi.Ports{Numbers: []int32{80}},
-						},
-					}},
-				}
-			}),
+			ActorTemplate: validActorTemplate(
+				withGoldenEgressPolicy(
+					withHTTPRule(hostnames("bad/host"), ports(80)))),
 		},
 		field.ErrorList{
 			field.Invalid(field.NewPath("actor_template", "golden_egress_policy", "rules").Index(0).Child("http", "hostnames").Index(0), nil, ""),
@@ -88,24 +78,10 @@ func TestValidateCreateActorTemplateRequest(t *testing.T) {
 	}, {
 		"golden egress rules tie across protocols",
 		&ateapi.CreateActorTemplateRequest{
-			ActorTemplate: validActorTemplate(func(tmpl *ateapi.ActorTemplate) {
-				tmpl.GoldenEgressPolicy = &ateapi.EgressPolicyTemplate{
-					Rules: []*ateapi.EgressRule{
-						{
-							Https: &ateapi.HttpsRule{
-								Hostnames: []string{"api.example.com"},
-								Ports:     &ateapi.Ports{Numbers: []int32{443}},
-							},
-						},
-						{
-							TlsPassthrough: &ateapi.TlsPassthroughRule{
-								Hostnames: []string{"api.example.com"},
-								Ports:     &ateapi.Ports{Numbers: []int32{443}},
-							},
-						},
-					},
-				}
-			}),
+			ActorTemplate: validActorTemplate(
+				withGoldenEgressPolicy(
+					withHTTPSRule(hostnames("api.example.com"), ports(443)),
+					withTLSPassthroughRule(hostnames("api.example.com"), ports(443)))),
 		},
 		field.ErrorList{
 			field.Invalid(field.NewPath("actor_template", "golden_egress_policy", "rules").Index(1).Child("tls_passthrough", "hostnames").Index(0), nil, ""),
@@ -113,17 +89,8 @@ func TestValidateCreateActorTemplateRequest(t *testing.T) {
 	}, {
 		"too many golden egress rules",
 		&ateapi.CreateActorTemplateRequest{
-			ActorTemplate: validActorTemplate(func(tmpl *ateapi.ActorTemplate) {
-				tmpl.GoldenEgressPolicy = &ateapi.EgressPolicyTemplate{}
-				for i := range 257 {
-					tmpl.GoldenEgressPolicy.Rules = append(tmpl.GoldenEgressPolicy.Rules, &ateapi.EgressRule{
-						Http: &ateapi.HttpRule{
-							Hostnames: []string{fmt.Sprintf("host-%d.example.com", i)},
-							Ports:     &ateapi.Ports{Numbers: []int32{80}},
-						},
-					})
-				}
-			}),
+			ActorTemplate: validActorTemplate(
+				withGoldenEgressPolicy(withMultipleHTTPRules(257))),
 		},
 		field.ErrorList{
 			field.TooMany(field.NewPath("actor_template", "golden_egress_policy", "rules"), 257, 256).WithOrigin("maxItems"),
@@ -1380,6 +1347,54 @@ func validActorTemplate(mutations ...func(*ateapi.ActorTemplate)) *ateapi.ActorT
 		m(template)
 	}
 	return template
+}
+
+// withActorTemplateGoldenEgressPolicy returns a modifier func (see
+// validActorTemplate) which sets the template's golden_egress_policy to an
+// empty policy and applies mods to it. The withEgressPolicyTemplate*Rule
+// modifiers add rules.
+func withActorTemplateGoldenEgressPolicy(mods ...func(*ateapi.EgressPolicyTemplate)) func(*ateapi.ActorTemplate) {
+	return func(tmpl *ateapi.ActorTemplate) {
+		tmpl.GoldenEgressPolicy = &ateapi.EgressPolicyTemplate{}
+		for _, m := range mods {
+			m(tmpl.GoldenEgressPolicy)
+		}
+	}
+}
+
+// withEgressPolicyTemplateHTTPRule returns a modifier func (see
+// withActorTemplateGoldenEgressPolicy) which appends an HTTP rule.
+func withEgressPolicyTemplateHTTPRule(hosts []string, p *ateapi.Ports) func(*ateapi.EgressPolicyTemplate) {
+	return func(policy *ateapi.EgressPolicyTemplate) {
+		policy.Rules = append(policy.Rules, &ateapi.EgressRule{Http: &ateapi.HttpRule{Hostnames: hosts, Ports: p}})
+	}
+}
+
+// withEgressPolicyTemplateMultipleHTTPRules returns a modifier func (see
+// withActorTemplateGoldenEgressPolicy) which appends n HTTP rules, each for a
+// distinct hostname.
+func withEgressPolicyTemplateMultipleHTTPRules(n int) func(*ateapi.EgressPolicyTemplate) {
+	return func(policy *ateapi.EgressPolicyTemplate) {
+		policy.Rules = append(policy.Rules, numberedHTTPRules(n)...)
+	}
+}
+
+// withEgressPolicyTemplateHTTPSRule returns a modifier func (see
+// withActorTemplateGoldenEgressPolicy) which appends an HTTPS rule.
+func withEgressPolicyTemplateHTTPSRule(hosts []string, p *ateapi.Ports) func(*ateapi.EgressPolicyTemplate) {
+	return func(policy *ateapi.EgressPolicyTemplate) {
+		policy.Rules = append(policy.Rules, &ateapi.EgressRule{Https: &ateapi.HttpsRule{Hostnames: hosts, Ports: p}})
+	}
+}
+
+// withEgressPolicyTemplateTLSPassthroughRule returns a modifier func (see
+// withActorTemplateGoldenEgressPolicy) which appends a TLS passthrough rule.
+func withEgressPolicyTemplateTLSPassthroughRule(hosts []string, p *ateapi.Ports) func(*ateapi.EgressPolicyTemplate) {
+	return func(policy *ateapi.EgressPolicyTemplate) {
+		policy.Rules = append(policy.Rules, &ateapi.EgressRule{
+			TlsPassthrough: &ateapi.TlsPassthroughRule{Hostnames: hosts, Ports: p},
+		})
+	}
 }
 
 func validSystemInfoVolumeSource(mutate ...func(*ateapi.SystemInfoVolumeSource)) *ateapi.SystemInfoVolumeSource {

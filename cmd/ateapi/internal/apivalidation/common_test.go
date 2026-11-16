@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"go.ate.dev/substrate/api/ateapi/v1"
 	"go.ate.dev/substrate/internal/preview"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
@@ -75,4 +76,26 @@ func selectorLabelsOfSize(n int) map[string]string {
 func assertValidateErr(t *testing.T, got field.ErrorList, want field.ErrorList) {
 	t.Helper()
 	field.ErrorMatcher{}.ByType().ByField().ByOrigin().Test(t, want, got)
+}
+
+// hostnames returns its arguments, so a rule in a test table reads like
+// withHTTPRule(hostnames("a.example.com"), ports(80)).
+func hostnames(hosts ...string) []string {
+	return hosts
+}
+
+// ports returns Ports with the given numbers.
+func ports(nums ...int32) *ateapi.Ports {
+	return &ateapi.Ports{Numbers: nums}
+}
+
+// numberedHTTPRules returns n HTTP rules, each for a distinct hostname.
+func numberedHTTPRules(n int) []*ateapi.EgressRule {
+	rules := make([]*ateapi.EgressRule, n)
+	for i := range rules {
+		rules[i] = &ateapi.EgressRule{
+			Http: &ateapi.HttpRule{Hostnames: hostnames(fmt.Sprintf("host-%d.example.com", i))},
+		}
+	}
+	return rules
 }
