@@ -94,6 +94,24 @@ func allPorts() *ateapi.Ports {
 	return &ateapi.Ports{All: &ateapi.AllPorts{}}
 }
 
+// numberedPorts returns n distinct port numbers.
+func numberedPorts(n int) []int32 {
+	nums := make([]int32, n)
+	for i := range nums {
+		nums[i] = int32(8000 + i)
+	}
+	return nums
+}
+
+// numberedAudiences returns n distinct audiences.
+func numberedAudiences(n int) []string {
+	auds := make([]string, n)
+	for i := range auds {
+		auds[i] = fmt.Sprintf("https://%d.example.com", i)
+	}
+	return auds
+}
+
 // numberedHTTPRules returns n HTTP rules, each for a distinct hostname.
 func numberedHTTPRules(n int) []*ateapi.EgressRule {
 	rules := make([]*ateapi.EgressRule, n)

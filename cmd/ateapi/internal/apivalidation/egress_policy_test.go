@@ -59,17 +59,38 @@ func withEgressPolicyHTTPRule(hosts []string, mods ...func(*ateapi.HttpRule)) fu
 	}
 }
 
+// withEgressPolicyMultipleHTTPRules returns a modifier func (see
+// validEgressPolicy) which appends n HTTP rules, each for a distinct hostname.
+func withEgressPolicyMultipleHTTPRules(n int) func(*ateapi.EgressPolicy) {
+	return func(p *ateapi.EgressPolicy) { p.Rules = append(p.Rules, numberedHTTPRules(n)...) }
+}
+
 // withHTTPRulePorts returns a modifier func (see withEgressPolicyHTTPRule)
 // which sets the rule's ports.
 func withHTTPRulePorts(p *ateapi.Ports) func(*ateapi.HttpRule) {
 	return func(r *ateapi.HttpRule) { r.Ports = p }
 }
 
-// withHTTPRuleEffects returns a modifier func (see withEgressPolicyHTTPRule)
-// which sets the rule's effects to replace headers.
-func withHTTPRuleEffects(headers ...*ateapi.CredentialHeader) func(*ateapi.HttpRule) {
+// withHTTPRuleHeader returns a modifier func (see withEgressPolicyHTTPRule)
+// which appends a header to the rule's replace_headers effect.
+func withHTTPRuleHeader(h *ateapi.CredentialHeader) func(*ateapi.HttpRule) {
 	return func(r *ateapi.HttpRule) {
-		r.Effects = &ateapi.HttpRuleEffects{ReplaceHeaders: headers}
+		if r.Effects == nil {
+			r.Effects = &ateapi.HttpRuleEffects{}
+		}
+		r.Effects.ReplaceHeaders = append(r.Effects.ReplaceHeaders, h)
+	}
+}
+
+// withHTTPRuleMultipleHeaders returns a modifier func (see
+// withEgressPolicyHTTPRule) which appends n distinct headers, each replaced
+// with a secret.
+func withHTTPRuleMultipleHeaders(n int) func(*ateapi.HttpRule) {
+	return func(r *ateapi.HttpRule) {
+		for i := range n {
+			h := credentialHeader(fmt.Sprintf("X-Header-%d", i), "", "ate-secret://example.com/provider/secret")
+			withHTTPRuleHeader(h)(r)
+		}
 	}
 }
 
@@ -92,11 +113,15 @@ func withHTTPSRulePorts(p *ateapi.Ports) func(*ateapi.HttpsRule) {
 	return func(r *ateapi.HttpsRule) { r.Ports = p }
 }
 
-// withHTTPSRuleEffects returns a modifier func (see
-// withEgressPolicyHTTPSRule) which sets the rule's effects to replace headers.
-func withHTTPSRuleEffects(headers ...*ateapi.CredentialHeader) func(*ateapi.HttpsRule) {
+// withHTTPSRuleHeader returns a modifier func (see
+// withEgressPolicyHTTPSRule) which appends a header to the rule's
+// replace_headers effect.
+func withHTTPSRuleHeader(h *ateapi.CredentialHeader) func(*ateapi.HttpsRule) {
 	return func(r *ateapi.HttpsRule) {
-		r.Effects = &ateapi.HttpRuleEffects{ReplaceHeaders: headers}
+		if r.Effects == nil {
+			r.Effects = &ateapi.HttpRuleEffects{}
+		}
+		r.Effects.ReplaceHeaders = append(r.Effects.ReplaceHeaders, h)
 	}
 }
 
@@ -467,11 +492,13 @@ func TestValidateDeleteActorEgressPolicyRequest(t *testing.T) {
 
 func TestValidateEgressPolicyRules(t *testing.T) {
 	withHTTPRule := withEgressPolicyHTTPRule
+	withMultipleHTTPRules := withEgressPolicyMultipleHTTPRules
 	withPorts := withHTTPRulePorts
-	withEffects := withHTTPRuleEffects
+	withHeader := withHTTPRuleHeader
+	withMultipleHeaders := withHTTPRuleMultipleHeaders
 	withHTTPSRule := withEgressPolicyHTTPSRule
 	withHTTPSPorts := withHTTPSRulePorts
-	withHTTPSEffects := withHTTPSRuleEffects
+	withHTTPSHeader := withHTTPSRuleHeader
 	withTLSPassthroughRule := withEgressPolicyTLSPassthroughRule
 	const badPattern = `must be a DNS hostname, optionally with a complete leftmost-label wildcard, or "*"`
 	// authHeader replaces Authorization with a Kubernetes secret.
@@ -486,18 +513,6 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		}
 		return hosts
 	}
-	// numberedHeaders returns n distinct headers, each replaced with a secret.
-	numberedHeaders := func(n int) []*ateapi.CredentialHeader {
-		var headers []*ateapi.CredentialHeader
-		for i := range n {
-			headers = append(headers, credentialHeader(
-				fmt.Sprintf("X-Header-%d", i),
-				"",
-				"ate-secret://example.com/provider/secret",
-			))
-		}
-		return headers
-	}
 
 	tests := []struct {
 		name   string
@@ -511,21 +526,13 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(withHTTPRule(hostnames("api.example.com"))),
 	}, {
 		name:   "valid http rule with effects",
-		policy: validEgressPolicy(withHTTPRule(hostnames("api.example.com"), withEffects(authHeader()))),
+		policy: validEgressPolicy(withHTTPRule(hostnames("api.example.com"), withHeader(authHeader()))),
 	}, {
-		name: "many rules",
-		policy: validEgressPolicy(func(p *ateapi.EgressPolicy) {
-			for _, host := range numberedHostnames(256) {
-				withHTTPRule(hostnames(host))(p)
-			}
-		}),
+		name:   "many rules",
+		policy: validEgressPolicy(withMultipleHTTPRules(256)),
 	}, {
-		name: "too many rules",
-		policy: validEgressPolicy(func(p *ateapi.EgressPolicy) {
-			for _, host := range numberedHostnames(257) {
-				withHTTPRule(hostnames(host))(p)
-			}
-		}),
+		name:   "too many rules",
+		policy: validEgressPolicy(withMultipleHTTPRules(257)),
 		want: field.ErrorList{
 			field.TooMany(field.NewPath("egress_policy", "rules"), 257, 256).WithOrigin("maxItems"),
 		},
@@ -626,10 +633,10 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(withHTTPRule(hostnames("*.example.com"))),
 	}, {
 		name:   "wildcard with effects",
-		policy: validEgressPolicy(withHTTPRule(hostnames("*.example.com"), withEffects(authHeader()))),
+		policy: validEgressPolicy(withHTTPRule(hostnames("*.example.com"), withHeader(authHeader()))),
 	}, {
 		name:   "star pattern with effects",
-		policy: validEgressPolicy(withHTTPRule(hostnames("*"), withEffects(authHeader()))),
+		policy: validEgressPolicy(withHTTPRule(hostnames("*"), withHeader(authHeader()))),
 	}, {
 		name:   "invalid wildcard",
 		policy: validEgressPolicy(withHTTPRule(hostnames("api.*.example.com"))),
@@ -734,14 +741,8 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 			field.Duplicate(field.NewPath("egress_policy", "rules").Index(0).Child("http", "ports", "numbers").Index(1), int32(80)),
 		},
 	}, {
-		name: "too many ports",
-		policy: validEgressPolicy(func(p *ateapi.EgressPolicy) {
-			var many []int32
-			for i := range 17 {
-				many = append(many, int32(8000+i))
-			}
-			withHTTPRule(hostnames("api.example.com"), withPorts(ports(many...)))(p)
-		}),
+		name:   "too many ports",
+		policy: validEgressPolicy(withHTTPRule(hostnames("api.example.com"), withPorts(ports(numberedPorts(17)...)))),
 		want: field.ErrorList{
 			field.TooMany(field.NewPath("egress_policy", "rules").Index(0).Child("http", "ports", "numbers"), 17, 16).WithOrigin("maxItems"),
 		},
@@ -863,7 +864,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "", "ate-secret://kubernetes.io/provider/ns/name")),
+				withHeader(credentialHeader("Authorization", "", "ate-secret://kubernetes.io/provider/ns/name")),
 			),
 		),
 	}, {
@@ -871,7 +872,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("x-custom_header", "", "ate-secret://kubernetes.io/provider/ns/name")),
+				withHeader(credentialHeader("x-custom_header", "", "ate-secret://kubernetes.io/provider/ns/name")),
 			),
 		),
 	}, {
@@ -879,7 +880,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("!#$%&'*+-.^_`|~", "", "ate-secret://kubernetes.io/provider/ns/name")),
+				withHeader(credentialHeader("!#$%&'*+-.^_`|~", "", "ate-secret://kubernetes.io/provider/ns/name")),
 			),
 		),
 	}, {
@@ -887,7 +888,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("bad:header", "", "ate-secret://kubernetes.io/provider/ns/name")),
+				withHeader(credentialHeader("bad:header", "", "ate-secret://kubernetes.io/provider/ns/name")),
 			),
 		),
 		want: field.ErrorList{
@@ -898,7 +899,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("héader", "", "ate-secret://kubernetes.io/provider/ns/name")),
+				withHeader(credentialHeader("héader", "", "ate-secret://kubernetes.io/provider/ns/name")),
 			),
 		),
 		want: field.ErrorList{
@@ -909,7 +910,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "value\tvalue", "ate-secret://kubernetes.io/provider/ns/name")),
+				withHeader(credentialHeader("Authorization", "value\tvalue", "ate-secret://kubernetes.io/provider/ns/name")),
 			),
 		),
 	}, {
@@ -917,7 +918,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "\u0080\u0081", "ate-secret://kubernetes.io/provider/ns/name")),
+				withHeader(credentialHeader("Authorization", "\u0080\u0081", "ate-secret://kubernetes.io/provider/ns/name")),
 			),
 		),
 	}, {
@@ -925,7 +926,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "a\nb", "ate-secret://kubernetes.io/provider/ns/name")),
+				withHeader(credentialHeader("Authorization", "a\nb", "ate-secret://kubernetes.io/provider/ns/name")),
 			),
 		),
 		want: field.ErrorList{
@@ -936,7 +937,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "a\x00b", "ate-secret://kubernetes.io/provider/ns/name")),
+				withHeader(credentialHeader("Authorization", "a\x00b", "ate-secret://kubernetes.io/provider/ns/name")),
 			),
 		),
 		want: field.ErrorList{
@@ -947,7 +948,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "a\x1fb", "ate-secret://kubernetes.io/provider/ns/name")),
+				withHeader(credentialHeader("Authorization", "a\x1fb", "ate-secret://kubernetes.io/provider/ns/name")),
 			),
 		),
 		want: field.ErrorList{
@@ -958,7 +959,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "a\x7fb", "ate-secret://kubernetes.io/provider/ns/name")),
+				withHeader(credentialHeader("Authorization", "a\x7fb", "ate-secret://kubernetes.io/provider/ns/name")),
 			),
 		),
 		want: field.ErrorList{
@@ -969,7 +970,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "", "ate-secret://vault.example/provider/secret")),
+				withHeader(credentialHeader("Authorization", "", "ate-secret://vault.example/provider/secret")),
 			),
 		),
 	}, {
@@ -977,7 +978,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "", "ate-secret://kubernetes.io/provider")),
+				withHeader(credentialHeader("Authorization", "", "ate-secret://kubernetes.io/provider")),
 			),
 		),
 		want: field.ErrorList{
@@ -988,7 +989,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "", "ate-secret://kubernetes.io//provider/secret")),
+				withHeader(credentialHeader("Authorization", "", "ate-secret://kubernetes.io//provider/secret")),
 			),
 		),
 		want: field.ErrorList{
@@ -999,7 +1000,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "", "ate-secret://kubernetes.io/provider/secret/")),
+				withHeader(credentialHeader("Authorization", "", "ate-secret://kubernetes.io/provider/secret/")),
 			),
 		),
 		want: field.ErrorList{
@@ -1010,7 +1011,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "", "ate-secret://kubernetes.io:443/provider/secret")),
+				withHeader(credentialHeader("Authorization", "", "ate-secret://kubernetes.io:443/provider/secret")),
 			),
 		),
 		want: field.ErrorList{
@@ -1021,7 +1022,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "", "ate-secret://kubernetes.io/provider/sec%2Fret")),
+				withHeader(credentialHeader("Authorization", "", "ate-secret://kubernetes.io/provider/sec%2Fret")),
 			),
 		),
 		want: field.ErrorList{
@@ -1032,7 +1033,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "", "ate-secret://kubernetes.io/provider/sec%2Dret")),
+				withHeader(credentialHeader("Authorization", "", "ate-secret://kubernetes.io/provider/sec%2Dret")),
 			),
 		),
 		want: field.ErrorList{
@@ -1043,7 +1044,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "", "ate-secret://user@kubernetes.io/provider/secret")),
+				withHeader(credentialHeader("Authorization", "", "ate-secret://user@kubernetes.io/provider/secret")),
 			),
 		),
 		want: field.ErrorList{
@@ -1054,7 +1055,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "", "ate-secret://kubernetes.io/provider/secret?version=2")),
+				withHeader(credentialHeader("Authorization", "", "ate-secret://kubernetes.io/provider/secret?version=2")),
 			),
 		),
 		want: field.ErrorList{
@@ -1065,7 +1066,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "", "ate-secret://kubernetes.io/provider/secret#v2")),
+				withHeader(credentialHeader("Authorization", "", "ate-secret://kubernetes.io/provider/secret#v2")),
 			),
 		),
 		want: field.ErrorList{
@@ -1076,7 +1077,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "", "ate-secret://Kubernetes.IO/provider/secret")),
+				withHeader(credentialHeader("Authorization", "", "ate-secret://Kubernetes.IO/provider/secret")),
 			),
 		),
 		want: field.ErrorList{
@@ -1087,7 +1088,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "", "ate-secret://kubernetes_io/provider/secret")),
+				withHeader(credentialHeader("Authorization", "", "ate-secret://kubernetes_io/provider/secret")),
 			),
 		),
 		want: field.ErrorList{
@@ -1098,7 +1099,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("", "Bearer ", "ate-secret://kubernetes.io/provider/ns/name")),
+				withHeader(credentialHeader("", "Bearer ", "ate-secret://kubernetes.io/provider/ns/name")),
 			),
 		),
 		want: field.ErrorList{
@@ -1109,7 +1110,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("bad header", "Bearer ", "ate-secret://kubernetes.io/provider/ns/name")),
+				withHeader(credentialHeader("bad header", "Bearer ", "ate-secret://kubernetes.io/provider/ns/name")),
 			),
 		),
 		want: field.ErrorList{
@@ -1120,10 +1121,8 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(
-					authHeader(),
-					credentialHeader("authorization", "", "ate-secret://example.com/provider/secret"),
-				),
+				withHeader(authHeader()),
+				withHeader(credentialHeader("authorization", "", "ate-secret://example.com/provider/secret")),
 			),
 		),
 		want: field.ErrorList{
@@ -1132,15 +1131,15 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 	}, {
 		name: "same header in later rule",
 		policy: validEgressPolicy(
-			withHTTPRule(hostnames("api.example.com"), withEffects(authHeader())),
-			withHTTPRule(hostnames("other.example.com"), withEffects(authHeader())),
+			withHTTPRule(hostnames("api.example.com"), withHeader(authHeader())),
+			withHTTPRule(hostnames("other.example.com"), withHeader(authHeader())),
 		),
 	}, {
 		name:   "many headers",
-		policy: validEgressPolicy(withHTTPRule(hostnames("api.example.com"), withEffects(numberedHeaders(16)...))),
+		policy: validEgressPolicy(withHTTPRule(hostnames("api.example.com"), withMultipleHeaders(16))),
 	}, {
 		name:   "too many headers",
-		policy: validEgressPolicy(withHTTPRule(hostnames("api.example.com"), withEffects(numberedHeaders(17)...))),
+		policy: validEgressPolicy(withHTTPRule(hostnames("api.example.com"), withMultipleHeaders(17))),
 		want: field.ErrorList{
 			field.TooMany(field.NewPath("egress_policy", "rules").Index(0).Child("http", "effects", "replace_headers"), 17, 16).WithOrigin("maxItems"),
 		},
@@ -1149,7 +1148,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "Bearer\r", "ate-secret://kubernetes.io/provider/ns/name")),
+				withHeader(credentialHeader("Authorization", "Bearer\r", "ate-secret://kubernetes.io/provider/ns/name")),
 			),
 		),
 		want: field.ErrorList{
@@ -1158,7 +1157,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 	}, {
 		name: "no credential source",
 		policy: validEgressPolicy(
-			withHTTPRule(hostnames("api.example.com"), withEffects(credentialHeader("Authorization", "Bearer ", ""))),
+			withHTTPRule(hostnames("api.example.com"), withHeader(credentialHeader("Authorization", "Bearer ", ""))),
 		),
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("egress_policy", "rules").Index(0).Child("http", "effects", "replace_headers").Index(0), nil, "one of").WithOrigin("union"),
@@ -1168,7 +1167,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(credentialHeader("Authorization", "Bearer ", "https://example.com/secret")),
+				withHeader(credentialHeader("Authorization", "Bearer ", "https://example.com/secret")),
 			),
 		),
 		want: field.ErrorList{
@@ -1179,7 +1178,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(actorJWTHeader("Authorization", "Bearer ", 900, "https://api.example.com")),
+				withHeader(actorJWTHeader("Authorization", "Bearer ", 900, "https://api.example.com")),
 			),
 		),
 	}, {
@@ -1187,7 +1186,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPSRule(
 				hostnames("api.example.com"),
-				withHTTPSEffects(actorJWTHeader("Authorization", "Bearer ", 900, "https://api.example.com")),
+				withHTTPSHeader(actorJWTHeader("Authorization", "Bearer ", 900, "https://api.example.com")),
 			),
 		),
 	}, {
@@ -1195,10 +1194,8 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(
-					authHeader(),
-					actorJWTHeader("X-Actor-Token", "Bearer ", 900, "https://api.example.com"),
-				),
+				withHeader(authHeader()),
+				withHeader(actorJWTHeader("X-Actor-Token", "Bearer ", 900, "https://api.example.com")),
 			),
 		),
 	}, {
@@ -1206,7 +1203,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(&ateapi.CredentialHeader{
+				withHeader(&ateapi.CredentialHeader{
 					Header:        "Authorization",
 					Prefix:        "Bearer ",
 					CredentialUri: "ate-secret://kubernetes.io/provider/ns/name",
@@ -1223,7 +1220,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 	}, {
 		name: "actor JWT without audiences",
 		policy: validEgressPolicy(
-			withHTTPRule(hostnames("api.example.com"), withEffects(actorJWTHeader("Authorization", "Bearer ", 900))),
+			withHTTPRule(hostnames("api.example.com"), withHeader(actorJWTHeader("Authorization", "Bearer ", 900))),
 		),
 		want: field.ErrorList{
 			field.Required(field.NewPath("egress_policy", "rules").Index(0).Child("http", "effects", "replace_headers").Index(0).Child("actor_jwt", "audiences"), ""),
@@ -1233,7 +1230,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(actorJWTHeader("Authorization", "Bearer ", 900, "")),
+				withHeader(actorJWTHeader("Authorization", "Bearer ", 900, "")),
 			),
 		),
 		want: field.ErrorList{
@@ -1244,7 +1241,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(actorJWTHeader("Authorization", "Bearer ", 900, strings.Repeat("a", 513))),
+				withHeader(actorJWTHeader("Authorization", "Bearer ", 900, strings.Repeat("a", 513))),
 			),
 		),
 		want: field.ErrorList{
@@ -1255,7 +1252,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(actorJWTHeader("Authorization", "Bearer ", 900, "a", "a")),
+				withHeader(actorJWTHeader("Authorization", "Bearer ", 900, "a", "a")),
 			),
 		),
 		want: field.ErrorList{
@@ -1263,23 +1260,19 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		},
 	}, {
 		name: "actor JWT with too many audiences",
-		policy: validEgressPolicy(func(p *ateapi.EgressPolicy) {
-			var audiences []string
-			for i := range 17 {
-				audiences = append(audiences, fmt.Sprintf("aud-%d", i))
-			}
+		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(actorJWTHeader("Authorization", "Bearer ", 900, audiences...)),
-			)(p)
-		}),
+				withHeader(actorJWTHeader("Authorization", "Bearer ", 900, numberedAudiences(17)...)),
+			),
+		),
 		want: field.ErrorList{
 			field.TooMany(field.NewPath("egress_policy", "rules").Index(0).Child("http", "effects", "replace_headers").Index(0).Child("actor_jwt", "audiences"), 17, 16).WithOrigin("maxItems"),
 		},
 	}, {
 		name: "actor JWT without a lifetime",
 		policy: validEgressPolicy(
-			withHTTPRule(hostnames("api.example.com"), withEffects(actorJWTHeader("Authorization", "Bearer ", 0, "a"))),
+			withHTTPRule(hostnames("api.example.com"), withHeader(actorJWTHeader("Authorization", "Bearer ", 0, "a"))),
 		),
 		want: field.ErrorList{
 			field.Required(field.NewPath("egress_policy", "rules").Index(0).Child("http", "effects", "replace_headers").Index(0).Child("actor_jwt", "expiration_seconds"), ""),
@@ -1289,10 +1282,8 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(
-					actorJWTHeader("Authorization", "Bearer ", 300, "a"),
-					actorJWTHeader("X-Actor-Token", "Bearer ", 3600, "a"),
-				),
+				withHeader(actorJWTHeader("Authorization", "Bearer ", 300, "a")),
+				withHeader(actorJWTHeader("X-Actor-Token", "Bearer ", 3600, "a")),
 			),
 		),
 	}, {
@@ -1300,7 +1291,7 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(actorJWTHeader("Authorization", "Bearer ", 299, "a")),
+				withHeader(actorJWTHeader("Authorization", "Bearer ", 299, "a")),
 			),
 		),
 		want: field.ErrorList{
@@ -1311,27 +1302,43 @@ func TestValidateEgressPolicyRules(t *testing.T) {
 		policy: validEgressPolicy(
 			withHTTPRule(
 				hostnames("api.example.com"),
-				withEffects(actorJWTHeader("Authorization", "Bearer ", 3601, "a")),
+				withHeader(actorJWTHeader("Authorization", "Bearer ", 3601, "a")),
 			),
 		),
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("egress_policy", "rules").Index(0).Child("http", "effects", "replace_headers").Index(0).Child("actor_jwt", "expiration_seconds"), 3601, "").WithOrigin("maximum"),
 		},
 	}, {
-		name:   "nil header",
-		policy: validEgressPolicy(withHTTPRule(hostnames("api.example.com"), withEffects(authHeader(), nil))),
+		name: "nil header",
+		policy: validEgressPolicy(
+			withHTTPRule(
+				hostnames("api.example.com"),
+				withHeader(authHeader()),
+				withHeader(nil),
+			),
+		),
 		want: field.ErrorList{
 			field.Required(field.NewPath("egress_policy", "rules").Index(0).Child("http", "effects", "replace_headers").Index(1), ""),
 		},
 	}, {
-		name:   "empty effects",
-		policy: validEgressPolicy(withHTTPRule(hostnames("api.example.com"), withEffects())),
+		name: "empty effects",
+		policy: validEgressPolicy(
+			withHTTPRule(
+				hostnames("api.example.com"),
+				func(r *ateapi.HttpRule) { r.Effects = &ateapi.HttpRuleEffects{} },
+			),
+		),
 		want: field.ErrorList{
 			field.Required(field.NewPath("egress_policy", "rules").Index(0).Child("http", "effects"), "at least one effect must be specified"),
 		},
 	}, {
-		name:   "effects on an https rule",
-		policy: validEgressPolicy(withHTTPSRule(hostnames("api.example.com"), withHTTPSEffects())),
+		name: "effects on an https rule",
+		policy: validEgressPolicy(
+			withHTTPSRule(
+				hostnames("api.example.com"),
+				func(r *ateapi.HttpsRule) { r.Effects = &ateapi.HttpRuleEffects{} },
+			),
+		),
 		want: field.ErrorList{
 			field.Required(field.NewPath("egress_policy", "rules").Index(0).Child("https", "effects"), "at least one effect must be specified"),
 		},
