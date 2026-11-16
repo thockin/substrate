@@ -357,6 +357,16 @@ func TestValidateCreateActorTemplateRequest(t *testing.T) {
 		field.ErrorList{
 			field.Required(field.NewPath("actor_template", "golden_egress_policy", "rules").Index(0).Child("http", "effects", "replace_headers").Index(0), ""),
 		},
+	}, {
+		// The check that a mount names a declared volume skips a mount with no
+		// name; the required rule reports it.
+		"volume mount missing name",
+		&ateapi.CreateActorTemplateRequest{
+			ActorTemplate: validActorTemplate(withVolumeMount("", "/var/data")),
+		},
+		field.ErrorList{
+			field.Required(field.NewPath("actor_template", "containers").Index(0).Child("volume_mounts").Index(0).Child("name"), ""),
+		},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1240,6 +1250,38 @@ func TestValidateActorTemplate(t *testing.T) {
 		},
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("resources", "limits", "memory_bytes"), nil, "").WithOrigin("minimum"),
+		},
+	}, {
+		name:   "nil volume",
+		mutate: func(tmpl *ateapi.ActorTemplate) { tmpl.Volumes = []*ateapi.Volume{nil} },
+		want:   field.ErrorList{field.Required(field.NewPath("volumes").Index(0), "")},
+	}, {
+		name:   "nil volume_mount",
+		mutate: func(tmpl *ateapi.ActorTemplate) { tmpl.Containers[0].VolumeMounts = []*ateapi.VolumeMount{nil} },
+		want:   field.ErrorList{field.Required(field.NewPath("containers").Index(0).Child("volume_mounts").Index(0), "")},
+	}, {
+		name: "image volume reference too long",
+		// A well-formed reference cannot reach the length limit, so this one
+		// is also malformed.
+		mutate: withImageVolume("tools", "example.com/"+strings.Repeat("x", 512)+"@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+		want: field.ErrorList{
+			field.TooLong(field.NewPath("volumes").Index(0).Child("image", "reference"), nil, 512).WithOrigin("maxLength"),
+			field.Invalid(field.NewPath("volumes").Index(0).Child("image", "reference"), nil, ""),
+		},
+	}, {
+		name:   "mount_path too long",
+		mutate: withVolumeMount("data", "/"+strings.Repeat("m", 4096)),
+		want: field.ErrorList{
+			field.TooLong(field.NewPath("containers").Index(0).Child("volume_mounts").Index(0).Child("mount_path"), nil, 4096).WithOrigin("maxLength"),
+		},
+	}, {
+		name: "external volume without a template",
+		mutate: func(tmpl *ateapi.ActorTemplate) {
+			tmpl.Volumes = []*ateapi.Volume{{Name: "data", External: &ateapi.ExternalVolumeSource{}}}
+		},
+		want: field.ErrorList{field.Forbidden(field.NewPath("volumes").Index(0).Child("external"), "")},
+		wantWithPreview: map[string]field.ErrorList{
+			"ALL": {field.Invalid(field.NewPath("volumes").Index(0).Child("external"), nil, "one of").WithOrigin("union")},
 		},
 	}}
 	for _, tt := range tests {
