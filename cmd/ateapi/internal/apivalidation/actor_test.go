@@ -198,8 +198,10 @@ func TestValidateActorUpdate(t *testing.T) {
 	withState := withActorStatusState
 	withAssignedNode := withActorStatusAssignedNode
 	withLastAssignedGeneration := withActorStatusLastAssignedGeneration
-	withSnapshots := withActorStatusSnapshots
-	withExternalVolumes := withActorStatusExternalVolumes
+	withSnapshot := withActorStatusSnapshot
+	withMultipleSnapshots := withActorStatusMultipleSnapshots
+	withExternalVolume := withActorStatusExternalVolume
+	withMultipleExternalVolumes := withActorStatusMultipleExternalVolumes
 	withCrash := withActorStatusCrash
 	withCrashMessage := withActorCrashMessage
 	withWorkerAssignment := withActorStatusWorkerAssignment
@@ -663,17 +665,15 @@ func TestValidateActorUpdate(t *testing.T) {
 	}, {
 		name:   "valid actor.status.snapshots with durable object snapshot",
 		oldVal: validInput(),
-		newVal: validOutput(withStatus(withSnapshots(validSnapshot(withSnapshotDurableSnapshot())))),
+		newVal: validOutput(withStatus(withSnapshot(withSnapshotDurableSnapshot()))),
 	}, {
 		name:   "valid actor.status.snapshots actor_template_uid",
 		oldVal: validInput(),
 		newVal: validOutput(
 			withStatus(
-				withSnapshots(
-					validSnapshot(func(snap *ateapi.Snapshot) {
-						snap.ActorTemplateUid = "01234567-89ab-cdef-0123-456789abcdef"
-					}),
-				),
+				withSnapshot(func(snap *ateapi.Snapshot) {
+					snap.ActorTemplateUid = "01234567-89ab-cdef-0123-456789abcdef"
+				}),
 			),
 		),
 	}, {
@@ -681,20 +681,16 @@ func TestValidateActorUpdate(t *testing.T) {
 		name: "changing actor.status.snapshots.actor_template_uid is allowed",
 		oldVal: validInput(
 			withStatus(
-				withSnapshots(
-					validSnapshot(func(snap *ateapi.Snapshot) {
-						snap.ActorTemplateUid = "01234567-89ab-cdef-0123-456789abcdef"
-					}),
-				),
+				withSnapshot(func(snap *ateapi.Snapshot) {
+					snap.ActorTemplateUid = "01234567-89ab-cdef-0123-456789abcdef"
+				}),
 			),
 		),
 		newVal: validOutput(
 			withStatus(
-				withSnapshots(
-					validSnapshot(func(snap *ateapi.Snapshot) {
-						snap.ActorTemplateUid = "fedcba98-7654-3210-fedc-ba9876543210"
-					}),
-				),
+				withSnapshot(func(snap *ateapi.Snapshot) {
+					snap.ActorTemplateUid = "fedcba98-7654-3210-fedc-ba9876543210"
+				}),
 			),
 		),
 	}, {
@@ -702,7 +698,7 @@ func TestValidateActorUpdate(t *testing.T) {
 		oldVal: validInput(),
 		newVal: validOutput(
 			withStatus(
-				withSnapshots(validSnapshot(func(snap *ateapi.Snapshot) { snap.ActorTemplateUid = "not-a-uuid" })),
+				withSnapshot(func(snap *ateapi.Snapshot) { snap.ActorTemplateUid = "not-a-uuid" }),
 			),
 		),
 		want: field.ErrorList{
@@ -711,22 +707,20 @@ func TestValidateActorUpdate(t *testing.T) {
 	}, {
 		name:   "valid actor.status.snapshots uuid and locality",
 		oldVal: validInput(),
-		newVal: validOutput(withStatus(withSnapshots(validSnapshot(withSnapshotLocality())))),
+		newVal: validOutput(withStatus(withSnapshot(withSnapshotLocality()))),
 	}, {
 		name:   "missing actor.status.snapshots.uuid",
 		oldVal: validInput(),
-		newVal: validOutput(withStatus(withSnapshots(validSnapshot(func(snap *ateapi.Snapshot) { snap.Uuid = "" })))),
+		newVal: validOutput(withStatus(withSnapshot(func(snap *ateapi.Snapshot) { snap.Uuid = "" }))),
 		want:   field.ErrorList{field.Required(field.NewPath("status", "snapshots").Index(0).Child("uuid"), "")},
 	}, {
 		name:   "invalid actor.status.snapshots.uuid",
 		oldVal: validInput(),
 		newVal: validOutput(
 			withStatus(
-				withSnapshots(
-					validSnapshot(func(snap *ateapi.Snapshot) {
-						snap.Uuid = "SNAP 1"
-					}),
-				),
+				withSnapshot(func(snap *ateapi.Snapshot) {
+					snap.Uuid = "SNAP 1"
+				}),
 			),
 		),
 		want: field.ErrorList{
@@ -736,7 +730,7 @@ func TestValidateActorUpdate(t *testing.T) {
 		name:   "invalid actor.status.snapshots.locality",
 		oldVal: validInput(),
 		newVal: validOutput(
-			withStatus(withSnapshots(validSnapshot(func(snap *ateapi.Snapshot) { snap.Locality = "NODE 1" }))),
+			withStatus(withSnapshot(func(snap *ateapi.Snapshot) { snap.Locality = "NODE 1" })),
 		),
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("status", "snapshots").Index(0).Child("locality"), nil, "").WithOrigin("format=k8s-long-name"),
@@ -744,25 +738,18 @@ func TestValidateActorUpdate(t *testing.T) {
 	}, {
 		name:   "duplicate actor.status.snapshots generation",
 		oldVal: validInput(),
-		newVal: validOutput(withStatus(withSnapshots(validSnapshot(), validSnapshot()))),
+		newVal: validOutput(withStatus(withSnapshot(), withSnapshot())),
 		want:   field.ErrorList{field.Duplicate(field.NewPath("status", "snapshots").Index(1), nil)},
 	}, {
 		name:   "nil actor.status.snapshots entry",
 		oldVal: validInput(),
-		newVal: validOutput(withStatus(withSnapshots(nil))),
+		newVal: validOutput(withStatus(func(s *ateapi.ActorStatus) { s.Snapshots = append(s.Snapshots, nil) })),
 		want:   field.ErrorList{field.Required(field.NewPath("status", "snapshots").Index(0), "")},
 	}, {
 		name:   "too many actor.status.snapshots",
 		oldVal: validInput(),
 		newVal: validOutput(
-			withStatus(func(s *ateapi.ActorStatus) {
-				for gen := range int32(17) {
-					s.Snapshots = append(s.Snapshots,
-						validSnapshot(func(snap *ateapi.Snapshot) {
-							snap.Generation = gen + 1
-						}))
-				}
-			}),
+			withStatus(withMultipleSnapshots(17)),
 		),
 		want: field.ErrorList{field.TooMany(field.NewPath("status", "snapshots"), 17, 16).WithOrigin("maxItems")},
 	}, {
@@ -770,11 +757,9 @@ func TestValidateActorUpdate(t *testing.T) {
 		oldVal: validInput(),
 		newVal: validOutput(
 			withStatus(
-				withSnapshots(
-					validSnapshot(func(snap *ateapi.Snapshot) {
-						snap.Fidelity = ateapi.SnapshotFidelity_SNAPSHOT_FIDELITY_VOLUMES
-					}),
-				),
+				withSnapshot(func(snap *ateapi.Snapshot) {
+					snap.Fidelity = ateapi.SnapshotFidelity_SNAPSHOT_FIDELITY_VOLUMES
+				}),
 			),
 		),
 	}, {
@@ -782,11 +767,9 @@ func TestValidateActorUpdate(t *testing.T) {
 		oldVal: validInput(),
 		newVal: validOutput(
 			withStatus(
-				withSnapshots(
-					validSnapshot(func(snap *ateapi.Snapshot) {
-						snap.Fidelity = ateapi.SnapshotFidelity_SNAPSHOT_FIDELITY_UNSPECIFIED
-					}),
-				),
+				withSnapshot(func(snap *ateapi.Snapshot) {
+					snap.Fidelity = ateapi.SnapshotFidelity_SNAPSHOT_FIDELITY_UNSPECIFIED
+				}),
 			),
 		),
 		want: field.ErrorList{field.Required(field.NewPath("status", "snapshots").Index(0).Child("fidelity"), "")},
@@ -794,7 +777,7 @@ func TestValidateActorUpdate(t *testing.T) {
 		name:   "negative actor.status.snapshots.fidelity",
 		oldVal: validInput(),
 		newVal: validOutput(
-			withStatus(withSnapshots(validSnapshot(func(snap *ateapi.Snapshot) { snap.Fidelity = -1 }))),
+			withStatus(withSnapshot(func(snap *ateapi.Snapshot) { snap.Fidelity = -1 })),
 		),
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("status", "snapshots").Index(0).Child("fidelity"), nil, "").WithOrigin("minimum"),
@@ -803,7 +786,7 @@ func TestValidateActorUpdate(t *testing.T) {
 		name:   "invalid actor.status.snapshots.fidelity",
 		oldVal: validInput(),
 		newVal: validOutput(
-			withStatus(withSnapshots(validSnapshot(func(snap *ateapi.Snapshot) { snap.Fidelity = 4 }))),
+			withStatus(withSnapshot(func(snap *ateapi.Snapshot) { snap.Fidelity = 4 })),
 		),
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("status", "snapshots").Index(0).Child("fidelity"), nil, "").WithOrigin("maximum"),
@@ -817,9 +800,13 @@ func TestValidateActorUpdate(t *testing.T) {
 		want:            nil,
 		wantWithPreview: map[string]field.ErrorList{"ALL": nil},
 	}, {
-		name:            "empty external_volumes",
-		oldVal:          validInput(withStatus()),
-		newVal:          validOutput(withStatus(withExternalVolumes())),
+		name:   "empty external_volumes",
+		oldVal: validInput(withStatus()),
+		newVal: validOutput(
+			withStatus(func(s *ateapi.ActorStatus) {
+				s.ExternalVolumes = &ateapi.ExternalVolumes{}
+			}),
+		),
 		want:            nil,
 		wantWithPreview: map[string]field.ErrorList{"ALL": nil},
 	}, {
@@ -827,27 +814,25 @@ func TestValidateActorUpdate(t *testing.T) {
 		// in an update validates like one added at creation.
 		name:            "adding a volume",
 		oldVal:          validInput(withStatus()),
-		newVal:          validOutput(withStatus(withExternalVolumes(validExternalVolume()))),
+		newVal:          validOutput(withStatus(withExternalVolume())),
 		want:            nil,
 		wantWithPreview: map[string]field.ErrorList{"ALL": nil},
 	}, {
 		name:            "adding a volume to an actor with no status",
 		oldVal:          validInput(),
-		newVal:          validOutput(withStatus(withExternalVolumes(validExternalVolume()))),
+		newVal:          validOutput(withStatus(withExternalVolume())),
 		want:            nil,
 		wantWithPreview: map[string]field.ErrorList{"ALL": nil},
 	}, {
 		name:   "provisioning transition on an existing volume",
-		oldVal: validInput(withStatus(withExternalVolumes(validExternalVolume()))),
+		oldVal: validInput(withStatus(withExternalVolume())),
 		newVal: validOutput(
 			withStatus(
-				withExternalVolumes(
-					validExternalVolume(
-						withExternalVolumeStorageVolumeID(),
-						func(v *ateapi.ExternalVolumeStatus) {
-							v.VolumeContext = map[string]string{"attachment": "iqn.2026-08.io.ate:vol-a"}
-						},
-					),
+				withExternalVolume(
+					withExternalVolumeStorageVolumeID(),
+					func(v *ateapi.ExternalVolumeStatus) {
+						v.VolumeContext = map[string]string{"attachment": "iqn.2026-08.io.ate:vol-a"}
+					},
 				),
 			),
 		),
@@ -856,8 +841,13 @@ func TestValidateActorUpdate(t *testing.T) {
 	}, {
 		name:   "duplicate external_volumes volume_name",
 		oldVal: validInput(withStatus()),
-		newVal: validOutput(withStatus(withExternalVolumes(validExternalVolume(), validExternalVolume()))),
-		want:   field.ErrorList{field.Duplicate(field.NewPath("status", "external_volumes", "volumes").Index(1), nil)},
+		newVal: validOutput(
+			withStatus(
+				withExternalVolume(),
+				withExternalVolume(),
+			),
+		),
+		want: field.ErrorList{field.Duplicate(field.NewPath("status", "external_volumes", "volumes").Index(1), nil)},
 		wantWithPreview: map[string]field.ErrorList{
 			"ALL": {field.Duplicate(field.NewPath("status", "external_volumes", "volumes").Index(1), nil)},
 		},
@@ -866,7 +856,9 @@ func TestValidateActorUpdate(t *testing.T) {
 		oldVal: validInput(withStatus()),
 		newVal: validOutput(
 			withStatus(
-				withExternalVolumes(validExternalVolume(func(v *ateapi.ExternalVolumeStatus) { v.Name = "NOT A VOLUME" })),
+				withExternalVolume(func(v *ateapi.ExternalVolumeStatus) {
+					v.Name = "NOT A VOLUME"
+				}),
 			),
 		),
 		want: field.ErrorList{
@@ -876,25 +868,22 @@ func TestValidateActorUpdate(t *testing.T) {
 			"ALL": {field.Invalid(field.NewPath("status", "external_volumes", "volumes").Index(0).Child("name"), nil, "").WithOrigin("format=k8s-short-name")},
 		},
 	}, {
-		name:            "nil external_volumes entry",
-		oldVal:          validInput(withStatus()),
-		newVal:          validOutput(withStatus(withExternalVolumes(nil))),
-		want:            field.ErrorList{field.Required(field.NewPath("status", "external_volumes", "volumes").Index(0), "")},
-		wantWithPreview: map[string]field.ErrorList{"ALL": {field.Required(field.NewPath("status", "external_volumes", "volumes").Index(0), "")}},
+		name:   "nil external_volumes entry",
+		oldVal: validInput(withStatus()),
+		newVal: validOutput(
+			withStatus(func(s *ateapi.ActorStatus) {
+				s.ExternalVolumes = &ateapi.ExternalVolumes{Volumes: []*ateapi.ExternalVolumeStatus{nil}}
+			}),
+		),
+		want: field.ErrorList{field.Required(field.NewPath("status", "external_volumes", "volumes").Index(0), "")},
+		wantWithPreview: map[string]field.ErrorList{
+			"ALL": {field.Required(field.NewPath("status", "external_volumes", "volumes").Index(0), "")},
+		},
 	}, {
 		name:   "too many external_volumes",
 		oldVal: validInput(withStatus()),
 		newVal: validOutput(
-			withStatus(func(s *ateapi.ActorStatus) {
-				var vols []*ateapi.ExternalVolumeStatus
-				for i := range 33 {
-					vols = append(vols,
-						validExternalVolume(func(v *ateapi.ExternalVolumeStatus) {
-							v.Name = fmt.Sprintf("vol-%d", i)
-						}))
-				}
-				withExternalVolumes(vols...)(s)
-			}),
+			withStatus(withMultipleExternalVolumes(33)),
 		),
 		want: field.ErrorList{field.TooMany(field.NewPath("status", "external_volumes", "volumes"), 33, 32).WithOrigin("maxItems")},
 		wantWithPreview: map[string]field.ErrorList{
@@ -1312,16 +1301,42 @@ func withActorStatusLastAssignedGeneration(gen int32) func(*ateapi.ActorStatus) 
 	return func(s *ateapi.ActorStatus) { s.LastAssignedGeneration = gen }
 }
 
-// withActorStatusSnapshots returns a modifier func (see withActorStatus)
-// which sets the snapshots.
-func withActorStatusSnapshots(snaps ...*ateapi.Snapshot) func(*ateapi.ActorStatus) {
-	return func(s *ateapi.ActorStatus) { s.Snapshots = snaps }
+// withActorStatusSnapshot returns a modifier func (see withActorStatus)
+// which appends a valid snapshot with mods applied (see validSnapshot).
+func withActorStatusSnapshot(mods ...func(*ateapi.Snapshot)) func(*ateapi.ActorStatus) {
+	return func(s *ateapi.ActorStatus) { s.Snapshots = append(s.Snapshots, validSnapshot(mods...)) }
 }
 
-// withActorStatusExternalVolumes returns a modifier func (see
-// withActorStatus) which sets the external volumes.
-func withActorStatusExternalVolumes(vols ...*ateapi.ExternalVolumeStatus) func(*ateapi.ActorStatus) {
-	return func(s *ateapi.ActorStatus) { s.ExternalVolumes = &ateapi.ExternalVolumes{Volumes: vols} }
+// withActorStatusMultipleSnapshots returns a modifier func (see
+// withActorStatus) which appends n valid snapshots with distinct generations.
+func withActorStatusMultipleSnapshots(n int) func(*ateapi.ActorStatus) {
+	return func(s *ateapi.ActorStatus) {
+		for i := range n {
+			withActorStatusSnapshot(func(snap *ateapi.Snapshot) { snap.Generation = int32(i + 1) })(s)
+		}
+	}
+}
+
+// withActorStatusExternalVolume returns a modifier func (see
+// withActorStatus) which appends a valid external volume with mods applied
+// (see validExternalVolume).
+func withActorStatusExternalVolume(mods ...func(*ateapi.ExternalVolumeStatus)) func(*ateapi.ActorStatus) {
+	return func(s *ateapi.ActorStatus) {
+		if s.ExternalVolumes == nil {
+			s.ExternalVolumes = &ateapi.ExternalVolumes{}
+		}
+		s.ExternalVolumes.Volumes = append(s.ExternalVolumes.Volumes, validExternalVolume(mods...))
+	}
+}
+
+// withActorStatusMultipleExternalVolumes returns a modifier func (see
+// withActorStatus) which appends n valid external volumes with distinct names.
+func withActorStatusMultipleExternalVolumes(n int) func(*ateapi.ActorStatus) {
+	return func(s *ateapi.ActorStatus) {
+		for i := range n {
+			withActorStatusExternalVolume(func(v *ateapi.ExternalVolumeStatus) { v.Name = fmt.Sprintf("vol-%d", i) })(s)
+		}
+	}
 }
 
 // withActorStatusCrash returns a modifier func (see withActorStatus) which
@@ -1440,12 +1455,7 @@ func TestValidateMintActorJWTRequest(t *testing.T) {
 		want: field.ErrorList{field.Duplicate(field.NewPath("audiences").Index(1), nil)},
 	}, {
 		name: "too many audiences",
-		req: valid(func(r *ateapi.MintActorJwtRequest) {
-			r.Audiences = nil
-			for i := range 17 {
-				r.Audiences = append(r.Audiences, fmt.Sprintf("https://%d.example.com", i))
-			}
-		}),
+		req:  valid(withAudiences(numberedAudiences(17)...)),
 		want: field.ErrorList{field.TooMany(field.NewPath("audiences"), 17, 16).WithOrigin("maxItems")},
 	}, {
 		name: "audience too long",
@@ -1640,12 +1650,7 @@ func TestValidateMintWorkerActorJwtRequest(t *testing.T) {
 		want: field.ErrorList{field.Duplicate(field.NewPath("audiences").Index(1), nil)},
 	}, {
 		name: "too many audiences",
-		req: valid(func(r *ateapi.MintWorkerActorJwtRequest) {
-			r.Audiences = nil
-			for i := range 17 {
-				r.Audiences = append(r.Audiences, fmt.Sprintf("https://%d.example.com", i))
-			}
-		}),
+		req:  valid(withAudiences(numberedAudiences(17)...)),
 		want: field.ErrorList{field.TooMany(field.NewPath("audiences"), 17, 16).WithOrigin("maxItems")},
 	}, {
 		name: "empty audience",

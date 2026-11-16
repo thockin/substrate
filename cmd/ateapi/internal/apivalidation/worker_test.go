@@ -256,13 +256,7 @@ func TestValidateCreateWorkerRequest(t *testing.T) {
 	}, {
 		name: "too many labels",
 		req: validReq(
-			validWorker(apiWorkerName, func(w *ateapi.Worker) {
-				labels := make(map[string]string, 65)
-				for i := range 65 {
-					labels[fmt.Sprintf("key-%d", i)] = "v"
-				}
-				withLabels(labels)(w)
-			}),
+			validWorker(apiWorkerName, withLabels(numberedLabels(65))),
 		),
 		want: field.ErrorList{field.TooMany(field.NewPath("worker", "labels"), 65, 64).WithOrigin("maxProperties")},
 	}, {
@@ -590,8 +584,9 @@ func TestValidateWorkerUpdate(t *testing.T) {
 	withSpiffeID := withWorkerSpiffeID
 	withLabels := withWorkerLabels
 	withStatus := withWorkerStatus
-	withSandboxClasses := withWorkerStatusSandboxClasses
-	withRestorableRuntimes := withSandboxClassRestorableRuntimes
+	withSandboxClass := withWorkerStatusSandboxClass
+	withRestorableRuntime := withSandboxClassRestorableRuntime
+	withMultipleRestorableRuntimes := withSandboxClassMultipleRestorableRuntimes
 
 	tests := []struct {
 		name          string
@@ -727,62 +722,66 @@ func TestValidateWorkerUpdate(t *testing.T) {
 		},
 	}, {
 		name:          "valid sandbox runtimes",
-		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
-		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass(withRestorableRuntimes(sandboxRuntimes(32)...))))),
+		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClass("gvisor"))),
+		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClass("gvisor", withMultipleRestorableRuntimes(32)))),
 		requireStatus: true,
 	}, {
 		name:          "valid microvm sandbox class",
-		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
-		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass(withSandboxClassName("microvm"))))),
+		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClass("gvisor"))),
+		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClass("microvm"))),
 		requireStatus: true,
 	}, {
 		name:          "empty sandbox_classes",
-		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
-		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses())),
+		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClass("gvisor"))),
+		newVal:        validWorker(apiWorkerName, withStatus()),
 		requireStatus: true,
 	}, {
-		name:          "nil sandbox_classes entry",
-		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
-		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(nil))),
+		name:   "nil sandbox_classes entry",
+		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClass("gvisor"))),
+		newVal: validWorker(apiWorkerName,
+			withStatus(func(s *ateapi.WorkerStatus) {
+				s.SandboxClasses = append(s.SandboxClasses, nil)
+			})),
 		requireStatus: true,
 		want: field.ErrorList{
 			field.Required(field.NewPath("worker", "status", "sandbox_classes").Index(0), ""),
 		},
 	}, {
 		name:   "too many sandbox_classes",
-		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClass("gvisor"))),
 		newVal: validWorker(apiWorkerName,
-			withStatus(withSandboxClasses(validSandboxClass(), validSandboxClass(withSandboxClassName("microvm"))))),
+			withStatus(
+				withSandboxClass("gvisor"),
+				withSandboxClass("microvm"),
+			)),
 		requireStatus: true,
 		want: field.ErrorList{
 			field.TooMany(field.NewPath("worker", "status", "sandbox_classes"), 2, 1).WithOrigin("maxItems"),
 		},
 	}, {
 		name:          "missing sandbox_classes.sandbox_class",
-		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
-		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass(withSandboxClassName(""))))),
+		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClass("gvisor"))),
+		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClass(""))),
 		requireStatus: true,
 		want: field.ErrorList{
 			field.Required(field.NewPath("worker", "status", "sandbox_classes").Index(0).Child("sandbox_class"), ""),
 		},
 	}, {
 		name:          "unsupported sandbox_classes.sandbox_class",
-		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
-		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass(withSandboxClassName("kata"))))),
+		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClass("gvisor"))),
+		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClass("kata"))),
 		requireStatus: true,
 		want: field.ErrorList{
 			field.NotSupported[string](field.NewPath("worker", "status", "sandbox_classes").Index(0).Child("sandbox_class"), nil, nil),
 		},
 	}, {
 		name:   "missing sandbox_classes.default_runtime",
-		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClass("gvisor"))),
 		newVal: validWorker(apiWorkerName,
 			withStatus(
-				withSandboxClasses(
-					validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
-						c.DefaultRuntime = nil
-					}),
-				),
+				withSandboxClass("gvisor", func(c *ateapi.WorkerSandboxClass) {
+					c.DefaultRuntime = nil
+				}),
 			)),
 		requireStatus: true,
 		want: field.ErrorList{
@@ -790,14 +789,12 @@ func TestValidateWorkerUpdate(t *testing.T) {
 		},
 	}, {
 		name:   "missing sandbox_classes.default_runtime.version",
-		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClass("gvisor"))),
 		newVal: validWorker(apiWorkerName,
 			withStatus(
-				withSandboxClasses(
-					validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
-						c.DefaultRuntime.Version = nil
-					}),
-				),
+				withSandboxClass("gvisor", func(c *ateapi.WorkerSandboxClass) {
+					c.DefaultRuntime.Version = nil
+				}),
 			)),
 		requireStatus: true,
 		want: field.ErrorList{
@@ -805,14 +802,12 @@ func TestValidateWorkerUpdate(t *testing.T) {
 		},
 	}, {
 		name:   "too many default_runtime attributes",
-		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClass("gvisor"))),
 		newVal: validWorker(apiWorkerName,
 			withStatus(
-				withSandboxClasses(
-					validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
-						c.DefaultRuntime.Version.Attributes = attributeEntries(33)
-					}),
-				),
+				withSandboxClass("gvisor", func(c *ateapi.WorkerSandboxClass) {
+					c.DefaultRuntime.Version.Attributes = attributeEntries(33)
+				}),
 			)),
 		requireStatus: true,
 		want: field.ErrorList{
@@ -820,18 +815,13 @@ func TestValidateWorkerUpdate(t *testing.T) {
 		},
 	}, {
 		name:   "invalid restorable_runtimes entry",
-		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
+		oldVal: validWorker(apiWorkerName, withStatus(withSandboxClass("gvisor"))),
 		newVal: validWorker(apiWorkerName,
 			withStatus(
-				withSandboxClasses(
-					validSandboxClass(
-						withRestorableRuntimes(
-							sandboxRuntime(func(r *ateapi.WorkerSandboxRuntime) {
-								r.Version.SchemaVersion = ""
-							}),
-						),
-					),
-				),
+				withSandboxClass("gvisor",
+					withRestorableRuntime(func(r *ateapi.WorkerSandboxRuntime) {
+						r.Version.SchemaVersion = ""
+					})),
 			)),
 		requireStatus: true,
 		want: field.ErrorList{
@@ -839,8 +829,8 @@ func TestValidateWorkerUpdate(t *testing.T) {
 		},
 	}, {
 		name:          "too many restorable_runtimes",
-		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass()))),
-		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClasses(validSandboxClass(withRestorableRuntimes(sandboxRuntimes(33)...))))),
+		oldVal:        validWorker(apiWorkerName, withStatus(withSandboxClass("gvisor"))),
+		newVal:        validWorker(apiWorkerName, withStatus(withSandboxClass("gvisor", withMultipleRestorableRuntimes(33)))),
 		requireStatus: true,
 		want: field.ErrorList{
 			field.TooMany(field.NewPath("worker", "status", "sandbox_classes").Index(0).Child("restorable_runtimes"), 33, 32).WithOrigin("maxItems"),
@@ -1013,7 +1003,7 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		r := &ateapi.SetWorkerSandboxRuntimesRequest{
 			Worker:         workerRef(apiWorkerName),
 			Epoch:          1,
-			SandboxClasses: []*ateapi.WorkerSandboxClass{validSandboxClass()},
+			SandboxClasses: []*ateapi.WorkerSandboxClass{validSandboxClass("gvisor")},
 		}
 		for _, m := range mutate {
 			m(r)
@@ -1023,7 +1013,8 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 	withSandboxClasses := func(classes ...*ateapi.WorkerSandboxClass) func(*ateapi.SetWorkerSandboxRuntimesRequest) {
 		return func(r *ateapi.SetWorkerSandboxRuntimesRequest) { r.SandboxClasses = classes }
 	}
-	withRestorableRuntimes := withSandboxClassRestorableRuntimes
+	withRestorableRuntime := withSandboxClassRestorableRuntime
+	withMultipleRestorableRuntimes := withSandboxClassMultipleRestorableRuntimes
 	withActorOverhead := withRuntimeActorOverhead
 	// withAttributes returns a class whose default runtime has attrs.
 	withAttributes := func(attrs ...*ateapi.AttributeEntry) func(*ateapi.WorkerSandboxClass) {
@@ -1038,15 +1029,15 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		req:  valid(),
 	}, {
 		name: "valid microvm sandbox class",
-		req:  valid(withSandboxClasses(validSandboxClass(withSandboxClassName("microvm")))),
+		req:  valid(withSandboxClasses(validSandboxClass("microvm"))),
 	}, {
 		name: "valid with restorable runtimes",
-		req:  valid(withSandboxClasses(validSandboxClass(withRestorableRuntimes(sandboxRuntime())))),
+		req:  valid(withSandboxClasses(validSandboxClass("gvisor", withRestorableRuntime()))),
 	}, {
 		name: "valid with actor overhead",
 		req: valid(
 			withSandboxClasses(
-				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+				validSandboxClass("gvisor", func(c *ateapi.WorkerSandboxClass) {
 					c.DefaultRuntime = sandboxRuntime(withActorOverhead(64<<20, 32<<20))
 				}),
 			),
@@ -1055,7 +1046,7 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		name: "valid with a fixed actor overhead only",
 		req: valid(
 			withSandboxClasses(
-				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+				validSandboxClass("gvisor", func(c *ateapi.WorkerSandboxClass) {
 					c.DefaultRuntime = sandboxRuntime(withActorOverhead(64<<20, 0))
 				}),
 			),
@@ -1064,7 +1055,7 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		name: "actor overhead at the bounds",
 		req: valid(
 			withSandboxClasses(
-				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+				validSandboxClass("gvisor", func(c *ateapi.WorkerSandboxClass) {
 					c.DefaultRuntime = sandboxRuntime(withActorOverhead(1<<40, 1<<30))
 				}),
 			),
@@ -1073,7 +1064,7 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		name: "negative actor overhead",
 		req: valid(
 			withSandboxClasses(
-				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+				validSandboxClass("gvisor", func(c *ateapi.WorkerSandboxClass) {
 					c.DefaultRuntime = sandboxRuntime(withActorOverhead(-1, -1))
 				}),
 			),
@@ -1086,7 +1077,7 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		name: "actor overhead above the maximum",
 		req: valid(
 			withSandboxClasses(
-				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+				validSandboxClass("gvisor", func(c *ateapi.WorkerSandboxClass) {
 					c.DefaultRuntime = sandboxRuntime(withActorOverhead(1<<40+1, 1<<30+1))
 				}),
 			),
@@ -1127,36 +1118,40 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		want: field.ErrorList{field.Required(field.NewPath("sandbox_classes").Index(0), "")},
 	}, {
 		name: "too many sandbox_classes",
-		req:  valid(withSandboxClasses(validSandboxClass(), validSandboxClass(withSandboxClassName("microvm")))),
+		req:  valid(withSandboxClasses(validSandboxClass("gvisor"), validSandboxClass("microvm"))),
 		want: field.ErrorList{field.TooMany(field.NewPath("sandbox_classes"), 2, 1).WithOrigin("maxItems")},
 	}, {
 		name: "missing sandbox_classes.sandbox_class",
-		req:  valid(withSandboxClasses(validSandboxClass(withSandboxClassName("")))),
+		req:  valid(withSandboxClasses(validSandboxClass(""))),
 		want: field.ErrorList{field.Required(field.NewPath("sandbox_classes").Index(0).Child("sandbox_class"), "")},
 	}, {
 		name: "sandbox_classes.sandbox_class too long",
-		req:  valid(withSandboxClasses(validSandboxClass(withSandboxClassName(strings.Repeat("c", 64))))),
+		req:  valid(withSandboxClasses(validSandboxClass(strings.Repeat("c", 64)))),
 		want: field.ErrorList{
 			field.TooLong(field.NewPath("sandbox_classes").Index(0).Child("sandbox_class"), "", 63).WithOrigin("maxLength"),
 			field.NotSupported[string](field.NewPath("sandbox_classes").Index(0).Child("sandbox_class"), nil, nil),
 		},
 	}, {
 		name: "unsupported sandbox_classes.sandbox_class",
-		req:  valid(withSandboxClasses(validSandboxClass(withSandboxClassName("kata")))),
+		req:  valid(withSandboxClasses(validSandboxClass("kata"))),
 		want: field.ErrorList{
 			field.NotSupported[string](field.NewPath("sandbox_classes").Index(0).Child("sandbox_class"), nil, nil),
 		},
 	}, {
 		name: "missing sandbox_classes.default_runtime",
 		req: valid(
-			withSandboxClasses(validSandboxClass(func(c *ateapi.WorkerSandboxClass) { c.DefaultRuntime = nil })),
+			withSandboxClasses(
+				validSandboxClass("gvisor", func(c *ateapi.WorkerSandboxClass) {
+					c.DefaultRuntime = nil
+				}),
+			),
 		),
 		want: field.ErrorList{field.Required(field.NewPath("sandbox_classes").Index(0).Child("default_runtime"), "")},
 	}, {
 		name: "missing default_runtime.version",
 		req: valid(
 			withSandboxClasses(
-				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+				validSandboxClass("gvisor", func(c *ateapi.WorkerSandboxClass) {
 					c.DefaultRuntime.Version = nil
 				}),
 			),
@@ -1168,7 +1163,7 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		name: "missing default_runtime.schema_version",
 		req: valid(
 			withSandboxClasses(
-				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+				validSandboxClass("gvisor", func(c *ateapi.WorkerSandboxClass) {
 					c.DefaultRuntime.Version.SchemaVersion = ""
 				}),
 			),
@@ -1180,7 +1175,7 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		name: "default_runtime.schema_version too long",
 		req: valid(
 			withSandboxClasses(
-				validSandboxClass(func(c *ateapi.WorkerSandboxClass) {
+				validSandboxClass("gvisor", func(c *ateapi.WorkerSandboxClass) {
 					c.DefaultRuntime.Version.SchemaVersion = strings.Repeat("v", 65)
 				}),
 			),
@@ -1190,7 +1185,7 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		},
 	}, {
 		name: "missing default_runtime.attributes",
-		req:  valid(withSandboxClasses(validSandboxClass(withAttributes()))),
+		req:  valid(withSandboxClasses(validSandboxClass("gvisor", withAttributes()))),
 		want: field.ErrorList{
 			field.Required(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "version", "attributes"), ""),
 		},
@@ -1198,12 +1193,11 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		name: "duplicate attribute key",
 		req: valid(
 			withSandboxClasses(
-				validSandboxClass(
+				validSandboxClass("gvisor",
 					withAttributes(
 						&ateapi.AttributeEntry{Key: "architecture", Value: "amd64"},
 						&ateapi.AttributeEntry{Key: "architecture", Value: "arm64"},
-					),
-				),
+					)),
 			),
 		),
 		want: field.ErrorList{
@@ -1211,7 +1205,12 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		},
 	}, {
 		name: "missing attribute key",
-		req:  valid(withSandboxClasses(validSandboxClass(withAttributes(&ateapi.AttributeEntry{Value: "amd64"})))),
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass("gvisor",
+					withAttributes(&ateapi.AttributeEntry{Value: "amd64"})),
+			),
+		),
 		want: field.ErrorList{
 			field.Required(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "version", "attributes").Index(0).Child("key"), ""),
 		},
@@ -1219,7 +1218,8 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		name: "attribute key too long",
 		req: valid(
 			withSandboxClasses(
-				validSandboxClass(withAttributes(&ateapi.AttributeEntry{Key: strings.Repeat("k", 129), Value: "v"})),
+				validSandboxClass("gvisor",
+					withAttributes(&ateapi.AttributeEntry{Key: strings.Repeat("k", 129), Value: "v"})),
 			),
 		),
 		want: field.ErrorList{
@@ -1227,7 +1227,7 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		},
 	}, {
 		name: "missing attribute value",
-		req:  valid(withSandboxClasses(validSandboxClass(withAttributes(&ateapi.AttributeEntry{Key: "k"})))),
+		req:  valid(withSandboxClasses(validSandboxClass("gvisor", withAttributes(&ateapi.AttributeEntry{Key: "k"})))),
 		want: field.ErrorList{
 			field.Required(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "version", "attributes").Index(0).Child("value"), ""),
 		},
@@ -1235,7 +1235,8 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		name: "attribute value too long",
 		req: valid(
 			withSandboxClasses(
-				validSandboxClass(withAttributes(&ateapi.AttributeEntry{Key: "k", Value: strings.Repeat("v", 257)})),
+				validSandboxClass("gvisor",
+					withAttributes(&ateapi.AttributeEntry{Key: "k", Value: strings.Repeat("v", 257)})),
 			),
 		),
 		want: field.ErrorList{
@@ -1243,16 +1244,22 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		},
 	}, {
 		name: "attributes at the bound",
-		req:  valid(withSandboxClasses(validSandboxClass(withAttributes(attributeEntries(32)...)))),
+		req:  valid(withSandboxClasses(validSandboxClass("gvisor", withAttributes(attributeEntries(32)...)))),
 	}, {
 		name: "too many attributes",
-		req:  valid(withSandboxClasses(validSandboxClass(withAttributes(attributeEntries(33)...)))),
+		req:  valid(withSandboxClasses(validSandboxClass("gvisor", withAttributes(attributeEntries(33)...)))),
 		want: field.ErrorList{
 			field.TooMany(field.NewPath("sandbox_classes").Index(0).Child("default_runtime", "version", "attributes"), 33, 32).WithOrigin("maxItems"),
 		},
 	}, {
 		name: "nil restorable_runtimes entry",
-		req:  valid(withSandboxClasses(validSandboxClass(withRestorableRuntimes(nil)))),
+		req: valid(
+			withSandboxClasses(
+				validSandboxClass("gvisor", func(c *ateapi.WorkerSandboxClass) {
+					c.RestorableRuntimes = append(c.RestorableRuntimes, nil)
+				}),
+			),
+		),
 		want: field.ErrorList{
 			field.Required(field.NewPath("sandbox_classes").Index(0).Child("restorable_runtimes").Index(0), ""),
 		},
@@ -1260,13 +1267,10 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		name: "invalid restorable_runtimes entry",
 		req: valid(
 			withSandboxClasses(
-				validSandboxClass(
-					withRestorableRuntimes(
-						sandboxRuntime(func(r *ateapi.WorkerSandboxRuntime) {
-							r.Version.SchemaVersion = ""
-						}),
-					),
-				),
+				validSandboxClass("gvisor",
+					withRestorableRuntime(func(r *ateapi.WorkerSandboxRuntime) {
+						r.Version.SchemaVersion = ""
+					})),
 			),
 		),
 		want: field.ErrorList{
@@ -1276,9 +1280,10 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		name: "restorable_runtimes entry without a version",
 		req: valid(
 			withSandboxClasses(
-				validSandboxClass(
-					withRestorableRuntimes(sandboxRuntime(func(r *ateapi.WorkerSandboxRuntime) { r.Version = nil })),
-				),
+				validSandboxClass("gvisor",
+					withRestorableRuntime(func(r *ateapi.WorkerSandboxRuntime) {
+						r.Version = nil
+					})),
 			),
 		),
 		want: field.ErrorList{
@@ -1286,10 +1291,10 @@ func TestValidateSetWorkerSandboxRuntimesRequest(t *testing.T) {
 		},
 	}, {
 		name: "restorable_runtimes at the bound",
-		req:  valid(withSandboxClasses(validSandboxClass(withRestorableRuntimes(sandboxRuntimes(32)...)))),
+		req:  valid(withSandboxClasses(validSandboxClass("gvisor", withMultipleRestorableRuntimes(32)))),
 	}, {
 		name: "too many restorable_runtimes",
-		req:  valid(withSandboxClasses(validSandboxClass(withRestorableRuntimes(sandboxRuntimes(33)...)))),
+		req:  valid(withSandboxClasses(validSandboxClass("gvisor", withMultipleRestorableRuntimes(33)))),
 		want: field.ErrorList{
 			field.TooMany(field.NewPath("sandbox_classes").Index(0).Child("restorable_runtimes"), 33, 32).WithOrigin("maxItems"),
 		},
@@ -1679,6 +1684,15 @@ func withWorkerLabels(labels map[string]string) func(*ateapi.Worker) {
 	return func(w *ateapi.Worker) { w.Labels = labels }
 }
 
+// numberedLabels returns n distinct labels.
+func numberedLabels(n int) map[string]string {
+	labels := make(map[string]string, n)
+	for i := range n {
+		labels[fmt.Sprintf("key-%d", i)] = "v"
+	}
+	return labels
+}
+
 // withWorkerStatus returns a modifier func (see validWorker) which sets the
 // worker's status to a valid value with only its required state, and applies
 // mods to it.
@@ -1717,21 +1731,24 @@ func withWorkerStatusAllocated(allocated *ateapi.WorkerResources) func(*ateapi.W
 	return func(s *ateapi.WorkerStatus) { s.Allocated = allocated }
 }
 
-// withWorkerStatusSandboxClasses returns a modifier func (see
-// withWorkerStatus) which sets the sandbox_classes.
-func withWorkerStatusSandboxClasses(classes ...*ateapi.WorkerSandboxClass) func(*ateapi.WorkerStatus) {
-	return func(s *ateapi.WorkerStatus) { s.SandboxClasses = classes }
+// withWorkerStatusSandboxClass returns a modifier func (see
+// withWorkerStatus) which appends a valid sandbox class with mods applied
+// (see validSandboxClass).
+func withWorkerStatusSandboxClass(class string, mods ...func(*ateapi.WorkerSandboxClass)) func(*ateapi.WorkerStatus) {
+	return func(s *ateapi.WorkerStatus) {
+		s.SandboxClasses = append(s.SandboxClasses, validSandboxClass(class, mods...))
+	}
 }
 
 func workerRef(name string) *ateapi.ObjectRef {
 	return &ateapi.ObjectRef{Name: name}
 }
 
-// validSandboxClass returns a gvisor WorkerSandboxClass with only its required
-// default runtime. The withSandboxClass* modifiers set the rest.
-func validSandboxClass(mods ...func(*ateapi.WorkerSandboxClass)) *ateapi.WorkerSandboxClass {
+// validSandboxClass returns a WorkerSandboxClass named class with only its
+// required default runtime. The withSandboxClass* modifiers set the rest.
+func validSandboxClass(class string, mods ...func(*ateapi.WorkerSandboxClass)) *ateapi.WorkerSandboxClass {
 	c := &ateapi.WorkerSandboxClass{
-		SandboxClass:   "gvisor",
+		SandboxClass:   class,
 		DefaultRuntime: sandboxRuntime(),
 	}
 	for _, m := range mods {
@@ -1740,16 +1757,23 @@ func validSandboxClass(mods ...func(*ateapi.WorkerSandboxClass)) *ateapi.WorkerS
 	return c
 }
 
-// withSandboxClassName returns a modifier func (see validSandboxClass) which
-// sets the sandbox_class.
-func withSandboxClassName(class string) func(*ateapi.WorkerSandboxClass) {
-	return func(c *ateapi.WorkerSandboxClass) { c.SandboxClass = class }
+// withSandboxClassRestorableRuntime returns a modifier func (see
+// validSandboxClass) which appends a valid restorable runtime with mods
+// applied (see sandboxRuntime).
+func withSandboxClassRestorableRuntime(mods ...func(*ateapi.WorkerSandboxRuntime)) func(*ateapi.WorkerSandboxClass) {
+	return func(c *ateapi.WorkerSandboxClass) {
+		c.RestorableRuntimes = append(c.RestorableRuntimes, sandboxRuntime(mods...))
+	}
 }
 
-// withSandboxClassRestorableRuntimes returns a modifier func (see
-// validSandboxClass) which sets the restorable_runtimes.
-func withSandboxClassRestorableRuntimes(runtimes ...*ateapi.WorkerSandboxRuntime) func(*ateapi.WorkerSandboxClass) {
-	return func(c *ateapi.WorkerSandboxClass) { c.RestorableRuntimes = runtimes }
+// withSandboxClassMultipleRestorableRuntimes returns a modifier func (see
+// validSandboxClass) which appends n valid restorable runtimes.
+func withSandboxClassMultipleRestorableRuntimes(n int) func(*ateapi.WorkerSandboxClass) {
+	return func(c *ateapi.WorkerSandboxClass) {
+		for range n {
+			withSandboxClassRestorableRuntime()(c)
+		}
+	}
 }
 
 // sandboxRuntime returns a WorkerSandboxRuntime with only its required
@@ -1785,13 +1809,4 @@ func attributeEntries(n int) []*ateapi.AttributeEntry {
 		attrs[i] = &ateapi.AttributeEntry{Key: fmt.Sprintf("k%d", i), Value: "v"}
 	}
 	return attrs
-}
-
-// sandboxRuntimes returns n valid runtimes.
-func sandboxRuntimes(n int) []*ateapi.WorkerSandboxRuntime {
-	runtimes := make([]*ateapi.WorkerSandboxRuntime, n)
-	for i := range runtimes {
-		runtimes[i] = sandboxRuntime()
-	}
-	return runtimes
 }
