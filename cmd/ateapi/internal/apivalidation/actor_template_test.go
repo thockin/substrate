@@ -29,6 +29,8 @@ import (
 )
 
 func TestValidateCreateActorTemplateRequest(t *testing.T) {
+	withVolumeMount := withActorTemplateVolumeMount
+	withDurableDirVolume := withActorTemplateDurableDirVolume
 	withSnapshotConfig := withActorTemplateSnapshotConfig
 	withGoldenEgressPolicy := withActorTemplateGoldenEgressPolicy
 	withHTTPRule := withEgressPolicyTemplateHTTPRule
@@ -204,18 +206,16 @@ func TestValidateCreateActorTemplateRequest(t *testing.T) {
 	}, {
 		"volume mount referencing a declared volume",
 		&ateapi.CreateActorTemplateRequest{
-			ActorTemplate: validActorTemplate(func(tmpl *ateapi.ActorTemplate) {
-				tmpl.Volumes = []*ateapi.Volume{{Name: "data", DurableDir: &ateapi.DurableDirVolumeSource{}}}
-				tmpl.Containers[0].VolumeMounts = []*ateapi.VolumeMount{{Name: "data", MountPath: "/var/data"}}
-			}),
+			ActorTemplate: validActorTemplate(
+				withDurableDirVolume("data"),
+				withVolumeMount("data", "/var/data"),
+			),
 		},
 		nil,
 	}, {
 		"volume mount referencing an undeclared volume",
 		&ateapi.CreateActorTemplateRequest{
-			ActorTemplate: validActorTemplate(func(tmpl *ateapi.ActorTemplate) {
-				tmpl.Containers[0].VolumeMounts = []*ateapi.VolumeMount{{Name: "ghost-vol", MountPath: "/var/data"}}
-			}),
+			ActorTemplate: validActorTemplate(withVolumeMount("ghost-vol", "/var/data")),
 		},
 		field.ErrorList{
 			field.Invalid(field.NewPath("actor_template", "containers").Index(0).Child("volume_mounts").Index(0).Child("name"), "ghost-vol", ""),
@@ -374,18 +374,12 @@ func TestValidateCreateActorTemplateRequest(t *testing.T) {
 }
 
 func TestValidateCreateActorTemplateRequest_PreviewRestricted(t *testing.T) {
+	withExternalVolume := withActorTemplateExternalVolume
 	withSnapshotConfig := withActorTemplateSnapshotConfig
 	setPreviewForTest(t, "ALL")
 	req := &ateapi.CreateActorTemplateRequest{
 		ActorTemplate: validActorTemplate(
-			func(tmpl *ateapi.ActorTemplate) {
-				tmpl.Volumes = []*ateapi.Volume{{
-					Name: "data",
-					External: &ateapi.ExternalVolumeSource{
-						Template: &ateapi.ExternalVolumeTemplate{CapacityBytes: 10 << 30, StorageClassName: "fast-ssd"},
-					},
-				}}
-			},
+			withExternalVolume("data", 10<<30, "fast-ssd"),
 			withSnapshotConfig(
 				ateapi.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY,
 				func(sc *ateapi.SnapshotConfig) {
@@ -597,6 +591,12 @@ func TestValidateDeleteActorTemplateRequest(t *testing.T) {
 // directly. The request handler still runs the hand-written validator; this
 // pins each declarative rule as it is added, ahead of the conversion.
 func TestValidateActorTemplate(t *testing.T) {
+	withVolumeMount := withActorTemplateVolumeMount
+	withDurableDirVolume := withActorTemplateDurableDirVolume
+	withImageVolume := withActorTemplateImageVolume
+	withExternalVolume := withActorTemplateExternalVolume
+	withMultipleVolumeMounts := withActorTemplateMultipleVolumeMounts
+	withMultipleDurableDirVolumes := withActorTemplateMultipleDurableDirVolumes
 	withSnapshotConfig := withActorTemplateSnapshotConfig
 	tests := []struct {
 		name   string
@@ -755,32 +755,17 @@ func TestValidateActorTemplate(t *testing.T) {
 		},
 		want: field.ErrorList{field.Duplicate(field.NewPath("containers").Index(0).Child("env").Index(1), nil)},
 	}, {
-		name: "the same volume mounted at two paths is allowed",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Containers[0].VolumeMounts = []*ateapi.VolumeMount{
-				{Name: "data", MountPath: "/var/data"},
-				{Name: "data", MountPath: "/mnt/data"},
-			}
-		},
+		name:   "the same volume mounted at two paths is allowed",
+		mutate: combine(withVolumeMount("data", "/var/data"), withVolumeMount("data", "/mnt/data")),
 	}, {
-		name: "two volumes at the same path are rejected",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Containers[0].VolumeMounts = []*ateapi.VolumeMount{
-				{Name: "data", MountPath: "/var/data"},
-				{Name: "other", MountPath: "/var/data"},
-			}
-		},
+		name:   "two volumes at the same path are rejected",
+		mutate: combine(withVolumeMount("data", "/var/data"), withVolumeMount("other", "/var/data")),
 		want: field.ErrorList{
 			field.Duplicate(field.NewPath("containers").Index(0).Child("volume_mounts").Index(1), nil),
 		},
 	}, {
-		name: "nested mount paths are rejected",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Containers[0].VolumeMounts = []*ateapi.VolumeMount{
-				{Name: "data", MountPath: "/data"},
-				{Name: "config", MountPath: "/data/config"},
-			}
-		},
+		name:   "nested mount paths are rejected",
+		mutate: combine(withVolumeMount("data", "/data"), withVolumeMount("config", "/data/config")),
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("containers").Index(0).Child("volume_mounts").Index(1).Child("mount_path"), nil, ""),
 		},
@@ -791,18 +776,13 @@ func TestValidateActorTemplate(t *testing.T) {
 				Name:  "sidecar",
 				Image: "example.com/side:v1@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
 			})
-			tmpl.Containers[0].VolumeMounts = []*ateapi.VolumeMount{{Name: "data", MountPath: "/var/data"}}
+			withVolumeMount("data", "/var/data")(tmpl)
 			tmpl.Containers[1].VolumeMounts = []*ateapi.VolumeMount{{Name: "data", MountPath: "/var/data"}}
 		},
 	}, {
-		name: "duplicate volume name",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Volumes = []*ateapi.Volume{
-				{Name: "scratch", DurableDir: &ateapi.DurableDirVolumeSource{}},
-				{Name: "scratch", DurableDir: &ateapi.DurableDirVolumeSource{}},
-			}
-		},
-		want: field.ErrorList{field.Duplicate(field.NewPath("volumes").Index(1), nil)},
+		name:   "duplicate volume name",
+		mutate: combine(withDurableDirVolume("scratch"), withDurableDirVolume("scratch")),
+		want:   field.ErrorList{field.Duplicate(field.NewPath("volumes").Index(1), nil)},
 	}, {
 		name: "too many command entries",
 		mutate: func(tmpl *ateapi.ActorTemplate) {
@@ -844,13 +824,8 @@ func TestValidateActorTemplate(t *testing.T) {
 			field.TooLong(field.NewPath("containers").Index(0).Child("args").Index(0), nil, 4096).WithOrigin("maxLength"),
 		},
 	}, {
-		name: "too many volume_mounts",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			for i := 0; i < 33; i++ {
-				tmpl.Containers[0].VolumeMounts = append(tmpl.Containers[0].VolumeMounts,
-					&ateapi.VolumeMount{Name: "data", MountPath: fmt.Sprintf("/mnt/p%d", i)})
-			}
-		},
+		name:   "too many volume_mounts",
+		mutate: withMultipleVolumeMounts("data", 33),
 		want: field.ErrorList{
 			field.TooMany(field.NewPath("containers").Index(0).Child("volume_mounts"), 33, 32).WithOrigin("maxItems"),
 		},
@@ -1106,69 +1081,46 @@ func TestValidateActorTemplate(t *testing.T) {
 			field.Invalid(field.NewPath("containers").Index(0).Child("wakeup_probe", "http_get", "path"), nil, ""),
 		},
 	}, {
-		name: "valid volume_mount",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Containers[0].VolumeMounts = []*ateapi.VolumeMount{{Name: "data", MountPath: "/var/data"}}
-		},
+		name:   "valid volume_mount",
+		mutate: withVolumeMount("data", "/var/data"),
 	}, {
-		name: "volume_mount missing name",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Containers[0].VolumeMounts = []*ateapi.VolumeMount{{MountPath: "/var/data"}}
-		},
+		name:   "volume_mount missing name",
+		mutate: withVolumeMount("", "/var/data"),
 		want: field.ErrorList{
 			field.Required(field.NewPath("containers").Index(0).Child("volume_mounts").Index(0).Child("name"), ""),
 		},
 	}, {
-		name: "volume_mount invalid name",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Containers[0].VolumeMounts = []*ateapi.VolumeMount{{Name: "Data_1", MountPath: "/var/data"}}
-		},
+		name:   "volume_mount invalid name",
+		mutate: withVolumeMount("Data_1", "/var/data"),
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("containers").Index(0).Child("volume_mounts").Index(0).Child("name"), nil, "").WithOrigin("format=k8s-short-name"),
 		},
 	}, {
-		name: "volume_mount missing mount_path",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Containers[0].VolumeMounts = []*ateapi.VolumeMount{{Name: "data"}}
-		},
+		name:   "volume_mount missing mount_path",
+		mutate: withVolumeMount("data", ""),
 		want: field.ErrorList{
 			field.Required(field.NewPath("containers").Index(0).Child("volume_mounts").Index(0).Child("mount_path"), ""),
 		},
 	}, {
-		name: "relative mount_path",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Containers[0].VolumeMounts = []*ateapi.VolumeMount{{Name: "data", MountPath: "var/data"}}
-		},
+		name:   "relative mount_path",
+		mutate: withVolumeMount("data", "var/data"),
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("containers").Index(0).Child("volume_mounts").Index(0).Child("mount_path"), nil, ""),
 		},
 	}, {
-		name: "valid durable_dir volume",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Volumes = []*ateapi.Volume{{Name: "scratch", DurableDir: &ateapi.DurableDirVolumeSource{}}}
-		},
+		name:   "valid durable_dir volume",
+		mutate: withDurableDirVolume("scratch"),
 	}, {
-		name: "too many volumes",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			for i := 0; i < 33; i++ {
-				tmpl.Volumes = append(tmpl.Volumes, &ateapi.Volume{
-					Name:       fmt.Sprintf("vol-%d", i),
-					DurableDir: &ateapi.DurableDirVolumeSource{},
-				})
-			}
-		},
-		want: field.ErrorList{field.TooMany(field.NewPath("volumes"), 33, 32).WithOrigin("maxItems")},
+		name:   "too many volumes",
+		mutate: withMultipleDurableDirVolumes(33),
+		want:   field.ErrorList{field.TooMany(field.NewPath("volumes"), 33, 32).WithOrigin("maxItems")},
 	}, {
-		name: "volume missing name",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Volumes = []*ateapi.Volume{{DurableDir: &ateapi.DurableDirVolumeSource{}}}
-		},
-		want: field.ErrorList{field.Required(field.NewPath("volumes").Index(0).Child("name"), "")},
+		name:   "volume missing name",
+		mutate: withDurableDirVolume(""),
+		want:   field.ErrorList{field.Required(field.NewPath("volumes").Index(0).Child("name"), "")},
 	}, {
-		name: "volume invalid name",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Volumes = []*ateapi.Volume{{Name: "Scratch_1", DurableDir: &ateapi.DurableDirVolumeSource{}}}
-		},
+		name:   "volume invalid name",
+		mutate: withDurableDirVolume("Scratch_1"),
 		want: field.ErrorList{
 			field.Invalid(field.NewPath("volumes").Index(0).Child("name"), nil, "").WithOrigin("format=k8s-short-name"),
 		},
@@ -1191,101 +1143,52 @@ func TestValidateActorTemplate(t *testing.T) {
 		},
 		want: field.ErrorList{field.Invalid(field.NewPath("volumes").Index(0), nil, "one of").WithOrigin("union")},
 	}, {
-		name: "valid image volume",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Volumes = []*ateapi.Volume{{
-				Name: "tools",
-				Image: &ateapi.ImageVolumeSource{
-					Reference: "example.com/app@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-				},
-			}}
-		},
+		name:   "valid image volume",
+		mutate: withImageVolume("tools", "example.com/app@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
 	}, {
-		name: "image volume missing reference",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Volumes = []*ateapi.Volume{{Name: "tools", Image: &ateapi.ImageVolumeSource{}}}
-		},
-		want: field.ErrorList{field.Required(field.NewPath("volumes").Index(0).Child("image", "reference"), "")},
+		name:   "image volume missing reference",
+		mutate: withImageVolume("tools", ""),
+		want:   field.ErrorList{field.Required(field.NewPath("volumes").Index(0).Child("image", "reference"), "")},
 	}, {
-		name: "image volume reference missing digest",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Volumes = []*ateapi.Volume{{
-				Name:  "tools",
-				Image: &ateapi.ImageVolumeSource{Reference: "example.com/app:v1"},
-			}}
-		},
-		want: field.ErrorList{field.Invalid(field.NewPath("volumes").Index(0).Child("image", "reference"), nil, "")},
+		name:   "image volume reference missing digest",
+		mutate: withImageVolume("tools", "example.com/app:v1"),
+		want:   field.ErrorList{field.Invalid(field.NewPath("volumes").Index(0).Child("image", "reference"), nil, "")},
 	}, {
-		name: "valid external volume template",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Volumes = []*ateapi.Volume{{
-				Name: "data",
-				External: &ateapi.ExternalVolumeSource{
-					Template: &ateapi.ExternalVolumeTemplate{CapacityBytes: 10 << 30, StorageClassName: "fast-ssd"},
-				},
-			}}
-		},
+		name:            "valid external volume template",
+		mutate:          withExternalVolume("data", 10<<30, "fast-ssd"),
 		want:            field.ErrorList{field.Forbidden(field.NewPath("volumes").Index(0).Child("external"), "")},
 		wantWithPreview: map[string]field.ErrorList{"ALL": nil},
 	}, {
-		name: "external volume template missing capacity",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Volumes = []*ateapi.Volume{{
-				Name: "data",
-				External: &ateapi.ExternalVolumeSource{
-					Template: &ateapi.ExternalVolumeTemplate{StorageClassName: "fast-ssd"},
-				},
-			}}
-		},
-		want: field.ErrorList{field.Forbidden(field.NewPath("volumes").Index(0).Child("external"), "")},
+		name:   "external volume template missing capacity",
+		mutate: withExternalVolume("data", 0, "fast-ssd"),
+		want:   field.ErrorList{field.Forbidden(field.NewPath("volumes").Index(0).Child("external"), "")},
 		wantWithPreview: map[string]field.ErrorList{
 			"ALL": {
 				field.Required(field.NewPath("volumes").Index(0).Child("external", "template", "capacity_bytes"), ""),
 			},
 		},
 	}, {
-		name: "external volume template negative capacity",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Volumes = []*ateapi.Volume{{
-				Name: "data",
-				External: &ateapi.ExternalVolumeSource{
-					Template: &ateapi.ExternalVolumeTemplate{CapacityBytes: -1, StorageClassName: "fast-ssd"},
-				},
-			}}
-		},
-		want: field.ErrorList{field.Forbidden(field.NewPath("volumes").Index(0).Child("external"), "")},
+		name:   "external volume template negative capacity",
+		mutate: withExternalVolume("data", -1, "fast-ssd"),
+		want:   field.ErrorList{field.Forbidden(field.NewPath("volumes").Index(0).Child("external"), "")},
 		wantWithPreview: map[string]field.ErrorList{
 			"ALL": {
 				field.Invalid(field.NewPath("volumes").Index(0).Child("external", "template", "capacity_bytes"), nil, "").WithOrigin("minimum"),
 			},
 		},
 	}, {
-		name: "external volume template missing storage_class_name",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Volumes = []*ateapi.Volume{{
-				Name: "data",
-				External: &ateapi.ExternalVolumeSource{
-					Template: &ateapi.ExternalVolumeTemplate{CapacityBytes: 10 << 30},
-				},
-			}}
-		},
-		want: field.ErrorList{field.Forbidden(field.NewPath("volumes").Index(0).Child("external"), "")},
+		name:   "external volume template missing storage_class_name",
+		mutate: withExternalVolume("data", 10<<30, ""),
+		want:   field.ErrorList{field.Forbidden(field.NewPath("volumes").Index(0).Child("external"), "")},
 		wantWithPreview: map[string]field.ErrorList{
 			"ALL": {
 				field.Required(field.NewPath("volumes").Index(0).Child("external", "template", "storage_class_name"), ""),
 			},
 		},
 	}, {
-		name: "external volume template invalid storage_class_name",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Volumes = []*ateapi.Volume{{
-				Name: "data",
-				External: &ateapi.ExternalVolumeSource{
-					Template: &ateapi.ExternalVolumeTemplate{CapacityBytes: 10 << 30, StorageClassName: "Fast SSD"},
-				},
-			}}
-		},
-		want: field.ErrorList{field.Forbidden(field.NewPath("volumes").Index(0).Child("external"), "")},
+		name:   "external volume template invalid storage_class_name",
+		mutate: withExternalVolume("data", 10<<30, "Fast SSD"),
+		want:   field.ErrorList{field.Forbidden(field.NewPath("volumes").Index(0).Child("external"), "")},
 		wantWithPreview: map[string]field.ErrorList{
 			"ALL": {
 				field.Invalid(field.NewPath("volumes").Index(0).Child("external", "template", "storage_class_name"), nil, "").WithOrigin("format=k8s-long-name"),
@@ -1484,6 +1387,75 @@ func withActorTemplateSnapshotConfig(fidelity ateapi.SnapshotFidelity,
 		for _, m := range mods {
 			m(tmpl.SnapshotConfig)
 		}
+	}
+}
+
+// withActorTemplateDurableDirVolume returns a modifier func (see
+// validActorTemplate) which appends a durable_dir volume named name.
+func withActorTemplateDurableDirVolume(name string) func(*ateapi.ActorTemplate) {
+	return func(tmpl *ateapi.ActorTemplate) {
+		tmpl.Volumes = append(tmpl.Volumes, &ateapi.Volume{Name: name, DurableDir: &ateapi.DurableDirVolumeSource{}})
+	}
+}
+
+// withActorTemplateMultipleDurableDirVolumes returns a modifier func (see
+// validActorTemplate) which appends n durable_dir volumes with distinct names.
+func withActorTemplateMultipleDurableDirVolumes(n int) func(*ateapi.ActorTemplate) {
+	return func(tmpl *ateapi.ActorTemplate) {
+		for i := range n {
+			withActorTemplateDurableDirVolume(fmt.Sprintf("vol-%d", i))(tmpl)
+		}
+	}
+}
+
+// withActorTemplateImageVolume returns a modifier func (see
+// validActorTemplate) which appends a volume named name, backed by the image
+// at reference.
+func withActorTemplateImageVolume(name, reference string) func(*ateapi.ActorTemplate) {
+	return func(tmpl *ateapi.ActorTemplate) {
+		tmpl.Volumes = append(tmpl.Volumes, &ateapi.Volume{
+			Name:  name,
+			Image: &ateapi.ImageVolumeSource{Reference: reference},
+		})
+	}
+}
+
+// withActorTemplateVolumeMount returns a modifier func (see
+// validActorTemplate) which mounts the volume named name at mountPath in the
+// template's first container.
+func withActorTemplateVolumeMount(name, mountPath string) func(*ateapi.ActorTemplate) {
+	return func(tmpl *ateapi.ActorTemplate) {
+		c := tmpl.Containers[0]
+		c.VolumeMounts = append(c.VolumeMounts, &ateapi.VolumeMount{Name: name, MountPath: mountPath})
+	}
+}
+
+// withActorTemplateMultipleVolumeMounts returns a modifier func (see
+// validActorTemplate) which appends n mounts of the volume name at distinct
+// paths to the first container.
+func withActorTemplateMultipleVolumeMounts(name string, n int) func(*ateapi.ActorTemplate) {
+	return func(tmpl *ateapi.ActorTemplate) {
+		for i := range n {
+			withActorTemplateVolumeMount(name, fmt.Sprintf("/mnt/p%d", i))(tmpl)
+		}
+	}
+}
+
+// withActorTemplateExternalVolume returns a modifier func (see
+// validActorTemplate) which appends a volume named name, backed by an
+// external volume created from a template with the given capacity and
+// storage class.
+func withActorTemplateExternalVolume(name string, capacityBytes int64, storageClassName string) func(*ateapi.ActorTemplate) {
+	return func(tmpl *ateapi.ActorTemplate) {
+		tmpl.Volumes = append(tmpl.Volumes, &ateapi.Volume{
+			Name: name,
+			External: &ateapi.ExternalVolumeSource{
+				Template: &ateapi.ExternalVolumeTemplate{
+					CapacityBytes:    capacityBytes,
+					StorageClassName: storageClassName,
+				},
+			},
+		})
 	}
 }
 
