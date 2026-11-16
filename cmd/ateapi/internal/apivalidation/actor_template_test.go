@@ -317,6 +317,28 @@ func TestValidateCreateActorTemplateRequest(t *testing.T) {
 			field.Required(field.NewPath("actor_template", "resources", "limits", "cpu_millicores"), ""),
 			field.Required(field.NewPath("actor_template", "resources", "limits", "memory_bytes"), ""),
 		},
+	}, {
+		"nil golden egress rule",
+		&ateapi.CreateActorTemplateRequest{
+			ActorTemplate: validActorTemplate(
+				withGoldenEgressPolicy(func(policy *ateapi.EgressPolicyTemplate) {
+					policy.Rules = []*ateapi.EgressRule{nil}
+				})),
+		},
+		field.ErrorList{field.Required(field.NewPath("actor_template", "golden_egress_policy", "rules").Index(0), "")},
+	}, {
+		"nil golden egress replace_headers entry",
+		&ateapi.CreateActorTemplateRequest{
+			ActorTemplate: validActorTemplate(
+				withGoldenEgressPolicy(
+					withHTTPRule(hostnames("api.example.com"), ports(80)),
+					func(policy *ateapi.EgressPolicyTemplate) {
+						policy.Rules[0].Http.Effects = &ateapi.HttpRuleEffects{ReplaceHeaders: []*ateapi.CredentialHeader{nil}}
+					})),
+		},
+		field.ErrorList{
+			field.Required(field.NewPath("actor_template", "golden_egress_policy", "rules").Index(0).Child("http", "effects", "replace_headers").Index(0), ""),
+		},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -422,6 +444,32 @@ func TestValidateCreateActorTemplateRequest_PerTemplateSnapshotLocation(t *testi
 			assertValidateErr(t, ValidateCreateActorTemplateRequest(ctx, req), tt.want)
 		})
 	}
+}
+
+// TestValidateCreateActorTemplateRequest_GoldenEgressNeedsGoldenSnapshots
+// covers the cross-field rule that a golden egress policy needs golden
+// snapshots. It holds whether or not the GoldenEgressPolicy preview is on.
+func TestValidateCreateActorTemplateRequest_GoldenEgressNeedsGoldenSnapshots(t *testing.T) {
+	withGoldenEgressPolicy := withActorTemplateGoldenEgressPolicy
+	withHTTPRule := withEgressPolicyTemplateHTTPRule
+	goldenEgressPolicy := field.NewPath("actor_template", "golden_egress_policy")
+	req := &ateapi.CreateActorTemplateRequest{
+		ActorTemplate: validActorTemplate(
+			func(tmpl *ateapi.ActorTemplate) {
+				tmpl.SnapshotConfig.GoldenSnapshotConfig = &ateapi.GoldenSnapshotConfig{Mode: ateapi.GoldenSnapshotMode_GOLDEN_SNAPSHOT_MODE_DISABLED}
+			},
+			withGoldenEgressPolicy(
+				withHTTPRule(hostnames("api.example.com"), ports(80)))),
+	}
+	assertValidate(t, func() field.ErrorList {
+		return ValidateCreateActorTemplateRequest(context.Background(), req)
+	}, field.ErrorList{
+		// One error from the preview gate, one from the cross-field rule.
+		field.Forbidden(goldenEgressPolicy, ""),
+		field.Forbidden(goldenEgressPolicy, ""),
+	}, map[string]field.ErrorList{
+		"GoldenEgressPolicy": {field.Forbidden(goldenEgressPolicy, "")},
+	})
 }
 
 func TestValidateGetActorTemplateRequest(t *testing.T) {
