@@ -1273,6 +1273,10 @@ func TestValidateActorTemplate(t *testing.T) {
 			field.Invalid(field.NewPath("resources", "limits", "memory_bytes"), nil, "").WithOrigin("minimum"),
 		},
 	}, {
+		name:   "nil container",
+		mutate: func(tmpl *ateapi.ActorTemplate) { tmpl.Containers = append(tmpl.Containers, nil) },
+		want:   field.ErrorList{field.Required(field.NewPath("containers").Index(1), "")},
+	}, {
 		name:   "nil volume",
 		mutate: func(tmpl *ateapi.ActorTemplate) { tmpl.Volumes = []*ateapi.Volume{nil} },
 		want:   field.ErrorList{field.Required(field.NewPath("volumes").Index(0), "")},
@@ -1280,6 +1284,17 @@ func TestValidateActorTemplate(t *testing.T) {
 		name:   "nil volume_mount",
 		mutate: func(tmpl *ateapi.ActorTemplate) { tmpl.Containers[0].VolumeMounts = []*ateapi.VolumeMount{nil} },
 		want:   field.ErrorList{field.Required(field.NewPath("containers").Index(0).Child("volume_mounts").Index(0), "")},
+	}, {
+		name: "wakeup probe path too long",
+		mutate: func(tmpl *ateapi.ActorTemplate) {
+			tmpl.Containers[0].WakeupProbe = &ateapi.WakeupProbe{
+				HttpGet:        &ateapi.HttpGetAction{Path: "/" + strings.Repeat("p", 1024), Port: 8080},
+				TimeoutSeconds: 60,
+			}
+		},
+		want: field.ErrorList{
+			field.TooLong(field.NewPath("containers").Index(0).Child("wakeup_probe", "http_get", "path"), nil, 1024).WithOrigin("maxLength"),
+		},
 	}, {
 		name: "image volume reference too long",
 		// A well-formed reference cannot reach the length limit, so this one
@@ -1296,6 +1311,33 @@ func TestValidateActorTemplate(t *testing.T) {
 			field.TooLong(field.NewPath("containers").Index(0).Child("volume_mounts").Index(0).Child("mount_path"), nil, 4096).WithOrigin("maxLength"),
 		},
 	}, {
+		name: "duplicate dropped capability",
+		mutate: func(tmpl *ateapi.ActorTemplate) {
+			tmpl.Containers[0].SecurityContext = &ateapi.SecurityContext{
+				Capabilities: &ateapi.Capabilities{Drop: []string{"NET_RAW", "NET_RAW"}},
+			}
+		},
+		want: field.ErrorList{
+			field.Duplicate(field.NewPath("containers").Index(0).Child("security_context", "capabilities", "drop").Index(1), nil),
+		},
+	}, {
+		name: "too many dropped capabilities",
+		mutate: func(tmpl *ateapi.ActorTemplate) {
+			caps := make([]string, 65)
+			for i := range caps {
+				caps[i] = fmt.Sprintf("CAP%d", i)
+			}
+			tmpl.Containers[0].SecurityContext = &ateapi.SecurityContext{Capabilities: &ateapi.Capabilities{Drop: caps}}
+		},
+		want: field.ErrorList{
+			field.TooMany(field.NewPath("containers").Index(0).Child("security_context", "capabilities", "drop"), 65, 64).WithOrigin("maxItems"),
+		},
+	}, {
+		name: "security_context without capabilities",
+		mutate: func(tmpl *ateapi.ActorTemplate) {
+			tmpl.Containers[0].SecurityContext = &ateapi.SecurityContext{}
+		},
+	}, {
 		name: "external volume without a template",
 		mutate: func(tmpl *ateapi.ActorTemplate) {
 			tmpl.Volumes = []*ateapi.Volume{{Name: "data", External: &ateapi.ExternalVolumeSource{}}}
@@ -1304,6 +1346,17 @@ func TestValidateActorTemplate(t *testing.T) {
 		wantWithPreview: map[string]field.ErrorList{
 			"ALL": {field.Invalid(field.NewPath("volumes").Index(0).Child("external"), nil, "one of").WithOrigin("union")},
 		},
+	}, {
+		name: "status without golden_snapshot_status",
+		mutate: func(tmpl *ateapi.ActorTemplate) {
+			tmpl.Status = &ateapi.ActorTemplateStatus{}
+		},
+	}, {
+		name: "empty worker_selector match_labels",
+		mutate: func(tmpl *ateapi.ActorTemplate) {
+			tmpl.WorkerSelector = &ateapi.Selector{MatchLabels: map[string]string{}}
+		},
+		want: field.ErrorList{field.Invalid(field.NewPath("worker_selector"), nil, "one of").WithOrigin("union")},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1549,6 +1602,20 @@ func withSystemInfoActorMetadata(items ...*ateapi.ActorMetadataItem) func(*ateap
 	}
 }
 
+// actorMetadataItem returns an ActorMetadataItem projecting field to path.
+func actorMetadataItem(field ateapi.ActorMetadataField, path string) *ateapi.ActorMetadataItem {
+	return &ateapi.ActorMetadataItem{Field: field, Path: path}
+}
+
+// numberedActorMetadataItems returns n name items at distinct paths.
+func numberedActorMetadataItems(n int) []*ateapi.ActorMetadataItem {
+	items := make([]*ateapi.ActorMetadataItem, n)
+	for i := range items {
+		items[i] = actorMetadataItem(ateapi.ActorMetadataField_ACTOR_METADATA_FIELD_NAME, fmt.Sprintf("p%d", i))
+	}
+	return items
+}
+
 // withSystemInfoTrustBundle returns a modifier func (see
 // validSystemInfoVolumeSource) which appends a trust_bundle data source
 // writing the named bundles to path.
@@ -1734,6 +1801,20 @@ func TestValidateSystemInfoVolumeSource(t *testing.T) {
 			),
 		),
 		want: field.ErrorList{field.Forbidden(dsPath.Index(2).Child("actor_metadata"), "")},
+	}, {
+		name: "nil data source",
+		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
+			s.DataSources = []*ateapi.SystemInfoDataSource{nil}
+		}),
+		want: field.ErrorList{field.Required(dsPath.Index(0), "")},
+	}, {
+		name: "nil actor_metadata item",
+		obj:  valid(withSystemInfoActorMetadata(nil)),
+		want: field.ErrorList{field.Required(itemsPath.Index(0), "")},
+	}, {
+		name: "too many actor_metadata items",
+		obj:  valid(withSystemInfoActorMetadata(numberedActorMetadataItems(9)...)),
+		want: field.ErrorList{field.TooMany(itemsPath, 9, 8).WithOrigin("maxItems")},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1798,6 +1879,12 @@ func TestValidateTrustBundleDataSource(t *testing.T) {
 		name: "path traversal",
 		obj:  valid(func(tb *ateapi.TrustBundleDataSource) { tb.Path = "../escape" }),
 		want: field.ErrorList{field.Invalid(field.NewPath("path"), nil, "")},
+	}, {
+		name: "duplicate names",
+		obj: valid(func(tb *ateapi.TrustBundleDataSource) {
+			tb.Names = []string{"egress-mitm.ate.dev", "egress-mitm.ate.dev"}
+		}),
+		want: field.ErrorList{field.Duplicate(field.NewPath("names").Index(1), nil)},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
