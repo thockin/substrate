@@ -1534,33 +1534,48 @@ func withActorTemplateExternalVolume(name string, capacityBytes int64, storageCl
 	}
 }
 
+// validSystemInfoVolumeSource returns a SystemInfoVolumeSource with no data
+// sources, since they are optional. The withSystemInfo* modifiers add them.
 func validSystemInfoVolumeSource(mutate ...func(*ateapi.SystemInfoVolumeSource)) *ateapi.SystemInfoVolumeSource {
-	// This is valid with as many fields populated as possible.
-	s := &ateapi.SystemInfoVolumeSource{
-		DataSources: []*ateapi.SystemInfoDataSource{{
-			ActorMetadata: &ateapi.ActorMetadataDataSource{
-				Items: []*ateapi.ActorMetadataItem{{
-					Field: ateapi.ActorMetadataField_ACTOR_METADATA_FIELD_NAME,
-					Path:  "actor-name",
-				}, {
-					Field: ateapi.ActorMetadataField_ACTOR_METADATA_FIELD_UID,
-					Path:  "actor-uid",
-				}},
-			},
-		}, {
-			TrustBundle: &ateapi.TrustBundleDataSource{
-				Names: []string{"egress-mitm.ate.dev"},
-				Path:  "trust-bundle.pem",
-			},
-		}},
-	}
+	s := &ateapi.SystemInfoVolumeSource{}
 	for _, m := range mutate {
 		m(s)
 	}
 	return s
 }
 
+// withSystemInfoActorMetadata returns a modifier func (see
+// validSystemInfoVolumeSource) which appends an actor_metadata data source
+// projecting items.
+func withSystemInfoActorMetadata(items ...*ateapi.ActorMetadataItem) func(*ateapi.SystemInfoVolumeSource) {
+	return func(s *ateapi.SystemInfoVolumeSource) {
+		s.DataSources = append(s.DataSources, &ateapi.SystemInfoDataSource{
+			ActorMetadata: &ateapi.ActorMetadataDataSource{Items: items},
+		})
+	}
+}
+
+// withSystemInfoTrustBundle returns a modifier func (see
+// validSystemInfoVolumeSource) which appends a trust_bundle data source
+// writing the named bundles to path.
+func withSystemInfoTrustBundle(path string, names ...string) func(*ateapi.SystemInfoVolumeSource) {
+	return func(s *ateapi.SystemInfoVolumeSource) {
+		s.DataSources = append(s.DataSources, &ateapi.SystemInfoDataSource{
+			TrustBundle: &ateapi.TrustBundleDataSource{Names: names, Path: path},
+		})
+	}
+}
+
 func TestValidateSystemInfoVolumeSource(t *testing.T) {
+	// Most cases start from these two data sources, in this order.
+	withActorMetadata := func() func(*ateapi.SystemInfoVolumeSource) {
+		return withSystemInfoActorMetadata(
+			&ateapi.ActorMetadataItem{Field: ateapi.ActorMetadataField_ACTOR_METADATA_FIELD_NAME, Path: "actor-name"},
+			&ateapi.ActorMetadataItem{Field: ateapi.ActorMetadataField_ACTOR_METADATA_FIELD_UID, Path: "actor-uid"})
+	}
+	withTrustBundle := func() func(*ateapi.SystemInfoVolumeSource) {
+		return withSystemInfoTrustBundle("trust-bundle.pem", "egress-mitm.ate.dev")
+	}
 	valid := validSystemInfoVolumeSource
 	dsPath := field.NewPath("data_sources")
 	itemsPath := dsPath.Index(0).Child("actor_metadata", "items")
@@ -1573,111 +1588,157 @@ func TestValidateSystemInfoVolumeSource(t *testing.T) {
 		name: "valid",
 		obj:  valid(),
 	}, {
-		name: "valid: no data sources",
-		obj:  valid(func(s *ateapi.SystemInfoVolumeSource) { s.DataSources = nil }),
+		name: "valid with data sources",
+		obj:  valid(withActorMetadata(), withTrustBundle()),
+	}, {
+		name: "many data sources",
+		obj: valid(
+			func(s *ateapi.SystemInfoVolumeSource) {
+				for i := range 8 {
+					withSystemInfoTrustBundle(fmt.Sprintf("tb%d.pem", i), "egress-mitm.ate.dev")(s)
+				}
+			},
+		),
 	}, {
 		name: "too many data sources",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			for len(s.DataSources) <= 8 {
-				s.DataSources = append(s.DataSources, &ateapi.SystemInfoDataSource{
-					TrustBundle: &ateapi.TrustBundleDataSource{Names: []string{"egress-mitm.ate.dev"}, Path: "tb.pem"},
-				})
-			}
-		}),
+		obj: valid(
+			func(s *ateapi.SystemInfoVolumeSource) {
+				for i := range 9 {
+					withSystemInfoTrustBundle(fmt.Sprintf("tb%d.pem", i), "egress-mitm.ate.dev")(s)
+				}
+			},
+		),
 		want: field.ErrorList{field.TooMany(dsPath, 9, 8).WithOrigin("maxItems")},
 	}, {
 		name: "no union member set",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			s.DataSources[0].ActorMetadata = nil
-		}),
+		obj: valid(
+			withActorMetadata(),
+			func(s *ateapi.SystemInfoVolumeSource) {
+				s.DataSources[0].ActorMetadata = nil
+			},
+		),
 		want: field.ErrorList{field.Invalid(dsPath.Index(0), nil, "").WithOrigin("union")},
 	}, {
 		name: "both union members set",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			s.DataSources[0].TrustBundle = &ateapi.TrustBundleDataSource{
-				Names: []string{"egress-mitm.ate.dev"},
-				Path:  "tb2.pem",
-			}
-		}),
+		obj: valid(
+			withActorMetadata(),
+			func(s *ateapi.SystemInfoVolumeSource) {
+				s.DataSources[0].TrustBundle = &ateapi.TrustBundleDataSource{
+					Names: []string{"egress-mitm.ate.dev"},
+					Path:  "tb2.pem",
+				}
+			},
+		),
 		want: field.ErrorList{field.Invalid(dsPath.Index(0), nil, "").WithOrigin("union")},
 	}, {
-		name: "empty items",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			s.DataSources[0].ActorMetadata.Items = nil
-		}),
+		name: "empty ActorMetadata items",
+		obj: valid(
+			withActorMetadata(),
+			func(s *ateapi.SystemInfoVolumeSource) {
+				s.DataSources[0].ActorMetadata.Items = nil
+			},
+		),
 		want: field.ErrorList{field.Required(itemsPath, "")},
 	}, {
 		name: "duplicate projected field",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			s.DataSources[0].ActorMetadata.Items[1].Field = ateapi.ActorMetadataField_ACTOR_METADATA_FIELD_NAME
-		}),
+		obj: valid(
+			withActorMetadata(),
+			func(s *ateapi.SystemInfoVolumeSource) {
+				s.DataSources[0].ActorMetadata.Items[1].Field = ateapi.ActorMetadataField_ACTOR_METADATA_FIELD_NAME
+			},
+		),
 		want: field.ErrorList{field.Duplicate(itemsPath.Index(1), nil)},
 	}, {
 		name: "unspecified item field",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			s.DataSources[0].ActorMetadata.Items[0].Field = ateapi.ActorMetadataField_ACTOR_METADATA_FIELD_UNSPECIFIED
-		}),
+		obj: valid(
+			withActorMetadata(),
+			func(s *ateapi.SystemInfoVolumeSource) {
+				s.DataSources[0].ActorMetadata.Items[0].Field = ateapi.ActorMetadataField_ACTOR_METADATA_FIELD_UNSPECIFIED
+			},
+		),
 		want: field.ErrorList{field.Required(itemsPath.Index(0).Child("field"), "")},
 	}, {
 		name: "item field outside the enum",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			s.DataSources[0].ActorMetadata.Items[0].Field = ateapi.ActorMetadataField(99)
-		}),
+		obj: valid(
+			withActorMetadata(),
+			func(s *ateapi.SystemInfoVolumeSource) {
+				s.DataSources[0].ActorMetadata.Items[0].Field = ateapi.ActorMetadataField(99)
+			},
+		),
 		want: field.ErrorList{field.Invalid(itemsPath.Index(0).Child("field"), nil, "").WithOrigin("maximum")},
 	}, {
 		name: "negative item field",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			s.DataSources[0].ActorMetadata.Items[0].Field = ateapi.ActorMetadataField(-1)
-		}),
+		obj: valid(
+			withActorMetadata(),
+			func(s *ateapi.SystemInfoVolumeSource) {
+				s.DataSources[0].ActorMetadata.Items[0].Field = ateapi.ActorMetadataField(-1)
+			},
+		),
 		want: field.ErrorList{field.Invalid(itemsPath.Index(0).Child("field"), nil, "").WithOrigin("minimum")},
 	}, {
 		name: "empty item path",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			s.DataSources[0].ActorMetadata.Items[0].Path = ""
-		}),
+		obj: valid(
+			withActorMetadata(),
+			func(s *ateapi.SystemInfoVolumeSource) {
+				s.DataSources[0].ActorMetadata.Items[0].Path = ""
+			},
+		),
 		want: field.ErrorList{field.Required(itemsPath.Index(0).Child("path"), "")},
 	}, {
 		name: "item path too long",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			s.DataSources[0].ActorMetadata.Items[0].Path = strings.Repeat("p", 256)
-		}),
+		obj: valid(
+			withActorMetadata(),
+			func(s *ateapi.SystemInfoVolumeSource) {
+				s.DataSources[0].ActorMetadata.Items[0].Path = strings.Repeat("p", 256)
+			},
+		),
 		want: field.ErrorList{field.TooLong(itemsPath.Index(0).Child("path"), nil, 255).WithOrigin("maxLength")},
 	}, {
 		name: "item path traversal",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			s.DataSources[0].ActorMetadata.Items[0].Path = "../../traversal-escape"
-		}),
+		obj: valid(
+			withActorMetadata(),
+			func(s *ateapi.SystemInfoVolumeSource) {
+				s.DataSources[0].ActorMetadata.Items[0].Path = "../../traversal-escape"
+			},
+		),
 		want: field.ErrorList{field.Invalid(itemsPath.Index(0).Child("path"), nil, "")},
 	}, {
 		name: "trust bundle path traversal",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			s.DataSources[1].TrustBundle.Path = "../escape"
-		}),
-		want: field.ErrorList{field.Invalid(dsPath.Index(1).Child("trust_bundle", "path"), nil, "")},
+		obj: valid(
+			withTrustBundle(),
+			func(s *ateapi.SystemInfoVolumeSource) {
+				s.DataSources[0].TrustBundle.Path = "../escape"
+			},
+		),
+		want: field.ErrorList{field.Invalid(dsPath.Index(0).Child("trust_bundle", "path"), nil, "")},
 	}, {
 		name: "duplicate path within items",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			s.DataSources[0].ActorMetadata.Items[1].Path = "actor-name"
-		}),
+		obj: valid(
+			withActorMetadata(),
+			func(s *ateapi.SystemInfoVolumeSource) {
+				s.DataSources[0].ActorMetadata.Items[1].Path = "actor-name"
+			},
+		),
 		want: field.ErrorList{field.Duplicate(itemsPath.Index(1).Child("path"), nil)},
 	}, {
 		name: "duplicate path across data sources",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			s.DataSources[1].TrustBundle.Path = "actor-uid"
-		}),
+		obj: valid(
+			withActorMetadata(),
+			withTrustBundle(),
+			func(s *ateapi.SystemInfoVolumeSource) {
+				s.DataSources[1].TrustBundle.Path = "actor-uid"
+			},
+		),
 		want: field.ErrorList{field.Duplicate(dsPath.Index(1).Child("trust_bundle", "path"), nil)},
 	}, {
 		name: "second actor_metadata entry",
-		obj: valid(func(s *ateapi.SystemInfoVolumeSource) {
-			s.DataSources = append(s.DataSources, &ateapi.SystemInfoDataSource{
-				ActorMetadata: &ateapi.ActorMetadataDataSource{
-					Items: []*ateapi.ActorMetadataItem{{
-						Field: ateapi.ActorMetadataField_ACTOR_METADATA_FIELD_NAME,
-						Path:  "actor-name-2",
-					}},
-				},
-			})
-		}),
+		obj: valid(
+			withActorMetadata(),
+			withTrustBundle(),
+			withSystemInfoActorMetadata(
+				&ateapi.ActorMetadataItem{Field: ateapi.ActorMetadataField_ACTOR_METADATA_FIELD_NAME, Path: "actor-name-2"},
+			),
+		),
 		want: field.ErrorList{field.Forbidden(dsPath.Index(2).Child("actor_metadata"), "")},
 	}}
 	for _, tt := range tests {
