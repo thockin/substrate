@@ -99,3 +99,13 @@ func numberedHTTPRules(n int) []*ateapi.EgressRule {
 	}
 	return rules
 }
+
+// combine returns a modifier func which applies mods in order, for a test
+// table field that holds a single modifier.
+func combine[T any](mods ...func(T)) func(T) {
+	return func(obj T) {
+		for _, m := range mods {
+			m(obj)
+		}
+	}
+}
