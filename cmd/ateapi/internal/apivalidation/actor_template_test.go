@@ -608,6 +608,14 @@ func TestValidateActorTemplate(t *testing.T) {
 	withMultipleVolumeMounts := withActorTemplateMultipleVolumeMounts
 	withMultipleDurableDirVolumes := withActorTemplateMultipleDurableDirVolumes
 	withSnapshotConfig := withActorTemplateSnapshotConfig
+	withMultipleEnvVars := func(n int) func(*ateapi.ActorTemplate) {
+		return func(tmpl *ateapi.ActorTemplate) {
+			c := tmpl.Containers[0]
+			for i := range n {
+				c.Env = append(c.Env, &ateapi.EnvVar{Name: fmt.Sprintf("VAR_%d", i)})
+			}
+		}
+	}
 	tests := []struct {
 		name   string
 		mutate func(*ateapi.ActorTemplate) // nil leaves the template valid
@@ -759,12 +767,6 @@ func TestValidateActorTemplate(t *testing.T) {
 		},
 		want: field.ErrorList{field.Duplicate(field.NewPath("containers").Index(1), nil)},
 	}, {
-		name: "duplicate env name",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			tmpl.Containers[0].Env = []*ateapi.EnvVar{{Name: "PORT", Value: "1"}, {Name: "PORT", Value: "2"}}
-		},
-		want: field.ErrorList{field.Duplicate(field.NewPath("containers").Index(0).Child("env").Index(1), nil)},
-	}, {
 		name:   "the same volume mounted at two paths is allowed",
 		mutate: combine(withVolumeMount("data", "/var/data"), withVolumeMount("data", "/mnt/data")),
 	}, {
@@ -840,16 +842,6 @@ func TestValidateActorTemplate(t *testing.T) {
 			field.TooMany(field.NewPath("containers").Index(0).Child("volume_mounts"), 33, 32).WithOrigin("maxItems"),
 		},
 	}, {
-		name: "too many env entries",
-		mutate: func(tmpl *ateapi.ActorTemplate) {
-			for i := 0; i < 33; i++ {
-				tmpl.Containers[0].Env = append(tmpl.Containers[0].Env, &ateapi.EnvVar{Name: fmt.Sprintf("VAR_%d", i)})
-			}
-		},
-		want: field.ErrorList{
-			field.TooMany(field.NewPath("containers").Index(0).Child("env"), 33, 32).WithOrigin("maxItems"),
-		},
-	}, {
 		name: "image too long",
 		mutate: func(tmpl *ateapi.ActorTemplate) {
 			tmpl.Containers[0].Image = strings.Repeat("x", 513) + "@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -889,6 +881,15 @@ func TestValidateActorTemplate(t *testing.T) {
 			tmpl.Containers[0].Env = []*ateapi.EnvVar{{Name: "PORT", Value: "8080"}, {Name: "DEBUG"}}
 		},
 	}, {
+		name:   "max number of envs",
+		mutate: withMultipleEnvVars(32),
+	}, {
+		name:   "too many env entries",
+		mutate: withMultipleEnvVars(33),
+		want: field.ErrorList{
+			field.TooMany(field.NewPath("containers").Index(0).Child("env"), 33, 32).WithOrigin("maxItems"),
+		},
+	}, {
 		name: "env name with an equals sign",
 		mutate: func(tmpl *ateapi.ActorTemplate) {
 			tmpl.Containers[0].Env = []*ateapi.EnvVar{{Name: "FOO=BAR"}}
@@ -904,6 +905,32 @@ func TestValidateActorTemplate(t *testing.T) {
 		want: field.ErrorList{
 			field.Required(field.NewPath("containers").Index(0).Child("env").Index(0).Child("name"), ""),
 		},
+	}, {
+		name:   "nil env entry",
+		mutate: func(tmpl *ateapi.ActorTemplate) { tmpl.Containers[0].Env = []*ateapi.EnvVar{nil} },
+		want:   field.ErrorList{field.Required(field.NewPath("containers").Index(0).Child("env").Index(0), "")},
+	}, {
+		name: "env name too long",
+		mutate: func(tmpl *ateapi.ActorTemplate) {
+			tmpl.Containers[0].Env = []*ateapi.EnvVar{{Name: strings.Repeat("A", 257)}}
+		},
+		want: field.ErrorList{
+			field.TooLong(field.NewPath("containers").Index(0).Child("env").Index(0).Child("name"), nil, 256).WithOrigin("maxLength"),
+		},
+	}, {
+		name: "env value too long",
+		mutate: func(tmpl *ateapi.ActorTemplate) {
+			tmpl.Containers[0].Env = []*ateapi.EnvVar{{Name: "BIG", Value: strings.Repeat("x", 32769)}}
+		},
+		want: field.ErrorList{
+			field.TooLong(field.NewPath("containers").Index(0).Child("env").Index(0).Child("value"), nil, 32768).WithOrigin("maxLength"),
+		},
+	}, {
+		name: "duplicate env name",
+		mutate: func(tmpl *ateapi.ActorTemplate) {
+			tmpl.Containers[0].Env = []*ateapi.EnvVar{{Name: "PORT", Value: "1"}, {Name: "PORT", Value: "2"}}
+		},
+		want: field.ErrorList{field.Duplicate(field.NewPath("containers").Index(0).Child("env").Index(1), nil)},
 	}, {
 		name: "valid security_context capabilities",
 		mutate: func(tmpl *ateapi.ActorTemplate) {
