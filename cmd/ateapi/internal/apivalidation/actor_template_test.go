@@ -1808,18 +1808,34 @@ func TestValidateTrustBundleDataSource(t *testing.T) {
 	}
 }
 
+// validGoldenSnapshotStatus returns a GoldenSnapshotStatus with no fields
+// set, since all of them are optional. The withGoldenSnapshotStatus* modifiers
+// set them.
 func validGoldenSnapshotStatus(mutate ...func(*ateapi.GoldenSnapshotStatus)) *ateapi.GoldenSnapshotStatus {
-	s := &ateapi.GoldenSnapshotStatus{
-		GoldenTag:    &ateapi.ObjectRef{Atespace: "team-a", Name: "01234567-89ab-cdef-0123-456789abcdef"},
-		SnapshotTime: &timestamppb.Timestamp{Seconds: 867},
-	}
+	s := &ateapi.GoldenSnapshotStatus{}
 	for _, m := range mutate {
 		m(s)
 	}
 	return s
 }
 
+// withGoldenSnapshotStatusGoldenTag returns a modifier func (see
+// validGoldenSnapshotStatus) which sets the golden_tag to a valid value.
+func withGoldenSnapshotStatusGoldenTag() func(*ateapi.GoldenSnapshotStatus) {
+	return func(s *ateapi.GoldenSnapshotStatus) {
+		s.GoldenTag = &ateapi.ObjectRef{Atespace: "team-a", Name: "01234567-89ab-cdef-0123-456789abcdef"}
+	}
+}
+
+// withGoldenSnapshotStatusSnapshotTime returns a modifier func (see
+// validGoldenSnapshotStatus) which sets the snapshot_time to a valid value.
+func withGoldenSnapshotStatusSnapshotTime() func(*ateapi.GoldenSnapshotStatus) {
+	return func(s *ateapi.GoldenSnapshotStatus) { s.SnapshotTime = &timestamppb.Timestamp{Seconds: 867} }
+}
+
 func TestValidateGoldenSnapshotStatus(t *testing.T) {
+	withGoldenTag := withGoldenSnapshotStatusGoldenTag
+	withSnapshotTime := withGoldenSnapshotStatusSnapshotTime
 	valid := validGoldenSnapshotStatus
 	msgPath := field.NewPath("error_message")
 
@@ -1833,15 +1849,17 @@ func TestValidateGoldenSnapshotStatus(t *testing.T) {
 			obj:  valid(),
 		},
 		{
-			name: "valid empty",
-			obj:  &ateapi.GoldenSnapshotStatus{},
+			name: "valid with golden_tag and snapshot_time",
+			obj:  valid(withGoldenTag(), withSnapshotTime()),
 		},
 		{
 			name: "valid failed",
-			obj: &ateapi.GoldenSnapshotStatus{
-				SnapshotTime: &timestamppb.Timestamp{Seconds: 867},
-				ErrorMessage: "GoldenActorCrashed: golden actor crashed before its snapshot was taken",
-			},
+			obj: valid(
+				withSnapshotTime(),
+				func(s *ateapi.GoldenSnapshotStatus) {
+					s.ErrorMessage = "GoldenActorCrashed: golden actor crashed before its snapshot was taken"
+				},
+			),
 		},
 		{
 			name: "error_message at the bound",
@@ -1858,9 +1876,12 @@ func TestValidateGoldenSnapshotStatus(t *testing.T) {
 		},
 		{
 			name: "golden_tag missing atespace",
-			obj: valid(func(s *ateapi.GoldenSnapshotStatus) {
-				s.GoldenTag.Atespace = ""
-			}),
+			obj: valid(
+				withGoldenTag(),
+				func(s *ateapi.GoldenSnapshotStatus) {
+					s.GoldenTag.Atespace = ""
+				},
+			),
 			want: field.ErrorList{field.Required(field.NewPath("golden_tag", "atespace"), "")},
 		},
 	}
@@ -1873,6 +1894,8 @@ func TestValidateGoldenSnapshotStatus(t *testing.T) {
 }
 
 func TestValidateGoldenSnapshotStatusUpdate(t *testing.T) {
+	withGoldenTag := withGoldenSnapshotStatusGoldenTag
+	withSnapshotTime := withGoldenSnapshotStatusSnapshotTime
 	valid := validGoldenSnapshotStatus
 
 	tests := []struct {
@@ -1883,22 +1906,25 @@ func TestValidateGoldenSnapshotStatusUpdate(t *testing.T) {
 	}{
 		{
 			name:   "unchanged",
-			oldObj: valid(),
-			newObj: valid(),
+			oldObj: valid(withGoldenTag(), withSnapshotTime()),
+			newObj: valid(withGoldenTag(), withSnapshotTime()),
 		},
 		{
 			// The reconciler restarts the warmup clock on every resume, so the
 			// deadline must stay mutable.
 			name:   "snapshot_time changed",
-			oldObj: valid(),
-			newObj: valid(func(s *ateapi.GoldenSnapshotStatus) {
-				s.SnapshotTime = &timestamppb.Timestamp{Seconds: 5309}
-			}),
+			oldObj: valid(withSnapshotTime()),
+			newObj: valid(
+				withSnapshotTime(),
+				func(s *ateapi.GoldenSnapshotStatus) {
+					s.SnapshotTime = &timestamppb.Timestamp{Seconds: 5309}
+				},
+			),
 		},
 		{
 			name:   "snapshot_time set",
-			oldObj: &ateapi.GoldenSnapshotStatus{},
-			newObj: valid(),
+			oldObj: valid(),
+			newObj: valid(withSnapshotTime()),
 		},
 		{
 			name:   "error_message set",
