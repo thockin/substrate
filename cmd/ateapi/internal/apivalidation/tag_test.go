@@ -24,18 +24,8 @@ import (
 )
 
 func TestValidateCreateTagRequest(t *testing.T) {
+	withDurableSnapshot := withSnapshotDurableSnapshot
 	ctx := context.Background()
-	validTag := func(opts ...func(*ateapi.Tag)) *ateapi.Tag {
-		tag := &ateapi.Tag{
-			Metadata:    &ateapi.ResourceMetadata{Atespace: "ns1", Name: "tag1"},
-			Scope:       ateapi.TagScope_TAG_SCOPE_ATESPACE,
-			SourceActor: &ateapi.ObjectRef{Atespace: "ns1", Name: "id1"},
-		}
-		for _, opt := range opts {
-			opt(tag)
-		}
-		return tag
-	}
 	tests := []struct {
 		name      string
 		req       *ateapi.CreateTagRequest
@@ -52,12 +42,7 @@ func TestValidateCreateTagRequest(t *testing.T) {
 			// one either.
 			name: "valid with status",
 			req: &ateapi.CreateTagRequest{
-				Tag: validTag(func(tag *ateapi.Tag) {
-					tag.Status = &ateapi.TagStatus{
-						Snapshot:         validSnapshot(),
-						ActorTemplateUid: someActorUID,
-					}
-				}),
+				Tag: validTag(withTagStatus(withTagStatusSnapshot())),
 			},
 			wantError: nil,
 		},
@@ -91,7 +76,7 @@ func TestValidateCreateTagRequest(t *testing.T) {
 			req: &ateapi.CreateTagRequest{
 				Tag: validTag(func(tag *ateapi.Tag) {
 					tag.Status = &ateapi.TagStatus{
-						Snapshot:         validSnapshot(func(snap *ateapi.Snapshot) { snap.DurableSnapshot = nil }),
+						Snapshot:         validSnapshot(),
 						ActorTemplateUid: someActorUID,
 					}
 				}),
@@ -104,7 +89,7 @@ func TestValidateCreateTagRequest(t *testing.T) {
 			name: "missing tag.status.actor_template_uid",
 			req: &ateapi.CreateTagRequest{
 				Tag: validTag(func(tag *ateapi.Tag) {
-					tag.Status = &ateapi.TagStatus{Snapshot: validSnapshot()}
+					tag.Status = &ateapi.TagStatus{Snapshot: validSnapshot(withDurableSnapshot())}
 				}),
 			},
 			wantError: field.ErrorList{field.Required(field.NewPath("tag", "status", "actor_template_uid"), "")},
@@ -113,7 +98,10 @@ func TestValidateCreateTagRequest(t *testing.T) {
 			name: "invalid tag.status.actor_template_uid",
 			req: &ateapi.CreateTagRequest{
 				Tag: validTag(func(tag *ateapi.Tag) {
-					tag.Status = &ateapi.TagStatus{Snapshot: validSnapshot(), ActorTemplateUid: "not-a-uuid"}
+					tag.Status = &ateapi.TagStatus{
+						Snapshot:         validSnapshot(withDurableSnapshot()),
+						ActorTemplateUid: "not-a-uuid",
+					}
 				}),
 			},
 			wantError: field.ErrorList{
@@ -255,20 +243,10 @@ func TestValidateCreateTagRequest(t *testing.T) {
 }
 
 func TestValidateUpdateTagRequest(t *testing.T) {
+	withMetadata := withTagMetadata
+	withUID := withMetadataUID
+	withVersion := withMetadataVersion
 	ctx := context.Background()
-	// validUID is a well-formed uid to pass validation.
-	const validUID = "2a5f8c1e-9b3d-4f7a-8e6c-1d0b4a7f2e93"
-	validTag := func(opts ...func(*ateapi.Tag)) *ateapi.Tag {
-		tag := &ateapi.Tag{
-			Metadata:    &ateapi.ResourceMetadata{Atespace: "ns1", Name: "tag1", Uid: validUID, Version: 7},
-			Scope:       ateapi.TagScope_TAG_SCOPE_PUBLISHED,
-			SourceActor: &ateapi.ObjectRef{Atespace: "ns1", Name: "id1"},
-		}
-		for _, opt := range opts {
-			opt(tag)
-		}
-		return tag
-	}
 	tests := []struct {
 		name      string
 		req       *ateapi.UpdateTagRequest
@@ -277,6 +255,13 @@ func TestValidateUpdateTagRequest(t *testing.T) {
 		{
 			name:      "valid",
 			req:       &ateapi.UpdateTagRequest{Tag: validTag()},
+			wantError: nil,
+		},
+		{
+			name: "valid with preconditions",
+			req: &ateapi.UpdateTagRequest{
+				Tag: validTag(withMetadata(withUID(), withVersion())),
+			},
 			wantError: nil,
 		},
 		{
@@ -329,7 +314,7 @@ func TestValidateUpdateTagRequest(t *testing.T) {
 			// reaches the store. See TestUpdateTag_BlindWrite.
 			name: "missing tag.metadata.uid precondition",
 			req: &ateapi.UpdateTagRequest{
-				Tag: validTag(func(tag *ateapi.Tag) { tag.Metadata.Uid = "" }),
+				Tag: validTag(withMetadata(withVersion())),
 			},
 			wantError: nil,
 		},
@@ -345,7 +330,7 @@ func TestValidateUpdateTagRequest(t *testing.T) {
 		{
 			name: "missing tag.metadata.version precondition",
 			req: &ateapi.UpdateTagRequest{
-				Tag: validTag(func(tag *ateapi.Tag) { tag.Metadata.Version = 0 }),
+				Tag: validTag(withMetadata(withUID())),
 			},
 			wantError: nil,
 		},
@@ -376,9 +361,11 @@ func TestValidateUpdateTagRequest(t *testing.T) {
 			// one.
 			name: "tag.status is not checked against the request",
 			req: &ateapi.UpdateTagRequest{
-				Tag: validTag(func(tag *ateapi.Tag) {
-					tag.Status = &ateapi.TagStatus{Snapshot: badSnapshot()}
-				}),
+				Tag: validTag(
+					withTagStatus(func(status *ateapi.TagStatus) {
+						status.Snapshot = badSnapshot()
+					}),
+				),
 			},
 			wantError: nil,
 		},
@@ -394,14 +381,20 @@ func TestValidateUpdateTagRequest(t *testing.T) {
 // the merged tag the server is about to write, checked against the one it
 // replaces. This is where everything the request could not be held to lands.
 func TestValidateTagUpdate(t *testing.T) {
+	withStatus := withTagStatus
+	withSnapshot := withTagStatusSnapshot
 	ctx := context.Background()
 	tagPath := field.NewPath("tag")
-	pending := func(tag *ateapi.Tag) {
-		tag.Status.Snapshot.DurableSnapshot.State = ateapi.SnapshotStorageState_SNAPSHOT_STORAGE_STATE_PENDING
-	}
-	completed := func(tag *ateapi.Tag) {
-		tag.Status.Snapshot.DurableSnapshot.State = ateapi.SnapshotStorageState_SNAPSHOT_STORAGE_STATE_COMPLETED
-	}
+	pending := withStatus(
+		withSnapshot(func(s *ateapi.Snapshot) {
+			s.DurableSnapshot.State = ateapi.SnapshotStorageState_SNAPSHOT_STORAGE_STATE_PENDING
+		}),
+	)
+	completed := withStatus(
+		withSnapshot(func(s *ateapi.Snapshot) {
+			s.DurableSnapshot.State = ateapi.SnapshotStorageState_SNAPSHOT_STORAGE_STATE_COMPLETED
+		}),
+	)
 	tests := []struct {
 		name      string
 		oldVal    *ateapi.Tag
@@ -498,7 +491,7 @@ func TestValidateTagUpdate(t *testing.T) {
 		},
 		{
 			name:   "tag.status.snapshot recorded",
-			oldVal: validTag(func(tag *ateapi.Tag) { tag.Status.Snapshot = nil }),
+			oldVal: validTag(withStatus()),
 			newVal: validTag(pending),
 		},
 		{
@@ -537,25 +530,28 @@ func TestValidateTagUpdate(t *testing.T) {
 		{
 			name:   "tag.status.snapshot cleared",
 			oldVal: validTag(completed),
-			newVal: validTag(func(tag *ateapi.Tag) { tag.Status.Snapshot = nil }),
+			newVal: validTag(withStatus()),
 			wantError: field.ErrorList{
 				field.Invalid(tagPath.Child("status", "snapshot"), nil, "").WithOrigin("update"),
 			},
 		},
 		{
 			name:   "tag.status cleared",
-			oldVal: validTag(),
-			newVal: validTag(func(tag *ateapi.Tag) { tag.Status = nil }),
+			oldVal: validTag(completed),
+			newVal: validTag(),
 			wantError: field.ErrorList{
 				field.Invalid(tagPath.Child("status"), nil, "").WithOrigin("update"),
 			},
 		},
 		{
 			name:   "tag.status.actor_template_uid changed",
-			oldVal: validTag(),
-			newVal: validTag(func(tag *ateapi.Tag) {
-				tag.Status.ActorTemplateUid = "fedcba98-7654-3210-fedc-ba9876543210"
-			}),
+			oldVal: validTag(withStatus()),
+			newVal: validTag(
+				withStatus(),
+				func(tag *ateapi.Tag) {
+					tag.Status.ActorTemplateUid = "fedcba98-7654-3210-fedc-ba9876543210"
+				},
+			),
 			wantError: field.ErrorList{
 				field.Invalid(tagPath.Child("status", "actor_template_uid"), nil, "").WithOrigin("immutable"),
 			},
@@ -731,15 +727,11 @@ func TestValidateDeleteTagRequest(t *testing.T) {
 	}
 }
 
+// validTag returns a Tag with only its required fields set. The withTag*
+// modifiers set the optional fields.
 func validTag(mutate ...func(*ateapi.Tag)) *ateapi.Tag {
 	tag := &ateapi.Tag{
-		Metadata: validResourceMetadata(),
-		Status: &ateapi.TagStatus{
-			Snapshot: validSnapshot(func(s *ateapi.Snapshot) {
-				s.Owner = ateapi.SnapshotOwner_SNAPSHOT_OWNER_TAG
-			}),
-			ActorTemplateUid: someActorUID,
-		},
+		Metadata:    validResourceMetadata(withMetadataAtespace("as")),
 		Scope:       ateapi.TagScope_TAG_SCOPE_ATESPACE,
 		SourceActor: &ateapi.ObjectRef{Atespace: "as", Name: "nm"},
 	}
@@ -747,4 +739,41 @@ func validTag(mutate ...func(*ateapi.Tag)) *ateapi.Tag {
 		m(tag)
 	}
 	return tag
+}
+
+// withTagMetadata returns a modifier func (see validTag) which applies mods to
+// the tag's metadata.
+func withTagMetadata(mods ...func(*ateapi.ResourceMetadata)) func(*ateapi.Tag) {
+	return func(tag *ateapi.Tag) {
+		for _, m := range mods {
+			m(tag.Metadata)
+		}
+	}
+}
+
+// withTagStatus returns a modifier func (see validTag) which sets the tag's
+// status to a valid value with no snapshot.
+func withTagStatus(mods ...func(*ateapi.TagStatus)) func(*ateapi.Tag) {
+	return func(tag *ateapi.Tag) {
+		tag.Status = &ateapi.TagStatus{ActorTemplateUid: someActorUID}
+		for _, m := range mods {
+			m(tag.Status)
+		}
+	}
+}
+
+// withTagStatusSnapshot returns a modifier func (see withTagStatus) which sets
+// the tag's snapshot to a valid, COMPLETED snapshot owned by the tag.
+func withTagStatusSnapshot(mods ...func(*ateapi.Snapshot)) func(*ateapi.TagStatus) {
+	return func(status *ateapi.TagStatus) {
+		status.Snapshot = validSnapshot(
+			withSnapshotDurableSnapshot(),
+			func(s *ateapi.Snapshot) {
+				s.Owner = ateapi.SnapshotOwner_SNAPSHOT_OWNER_TAG
+			},
+		)
+		for _, m := range mods {
+			m(status.Snapshot)
+		}
+	}
 }
