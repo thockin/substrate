@@ -26,15 +26,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
+// validResourceMetadata returns ResourceMetadata with only its required name
+// set. The withMetadata* modifiers set the optional fields.
 func validResourceMetadata(mutate ...func(*ateapi.ResourceMetadata)) *ateapi.ResourceMetadata {
-	// This is valid with as many fields populated as possible.
 	rm := &ateapi.ResourceMetadata{
-		Atespace:   "as",
-		Name:       "nm",
-		Uid:        "01234567-89ab-cdef-0123-456789abcdef",
-		Version:    93,
-		CreateTime: &timestamppb.Timestamp{Seconds: 867},
-		UpdateTime: &timestamppb.Timestamp{Seconds: 5309},
+		Name: "nm",
 	}
 	for _, m := range mutate {
 		m(rm)
@@ -42,7 +38,39 @@ func validResourceMetadata(mutate ...func(*ateapi.ResourceMetadata)) *ateapi.Res
 	return rm
 }
 
+// withMetadataAtespace returns a modifier func (see validResourceMetadata)
+// which sets the atespace.
+func withMetadataAtespace(atespace string) func(*ateapi.ResourceMetadata) {
+	return func(rm *ateapi.ResourceMetadata) { rm.Atespace = atespace }
+}
+
+// withMetadataUID returns a modifier func (see validResourceMetadata) which
+// sets the uid to a valid value.
+func withMetadataUID() func(*ateapi.ResourceMetadata) {
+	return func(rm *ateapi.ResourceMetadata) { rm.Uid = "01234567-89ab-cdef-0123-456789abcdef" }
+}
+
+// withMetadataVersion returns a modifier func (see validResourceMetadata)
+// which sets the version to a valid value.
+func withMetadataVersion() func(*ateapi.ResourceMetadata) {
+	return func(rm *ateapi.ResourceMetadata) { rm.Version = 93 }
+}
+
+// withMetadataCreateTime returns a modifier func (see validResourceMetadata)
+// which sets the create_time to a valid value.
+func withMetadataCreateTime() func(*ateapi.ResourceMetadata) {
+	return func(rm *ateapi.ResourceMetadata) { rm.CreateTime = &timestamppb.Timestamp{Seconds: 867} }
+}
+
+// withMetadataUpdateTime returns a modifier func (see validResourceMetadata)
+// which sets the update_time to a valid value, after withMetadataCreateTime's.
+func withMetadataUpdateTime() func(*ateapi.ResourceMetadata) {
+	return func(rm *ateapi.ResourceMetadata) { rm.UpdateTime = &timestamppb.Timestamp{Seconds: 5309} }
+}
+
 func TestValidateResourceMetadataCreate(t *testing.T) {
+	withCreateTime := withMetadataCreateTime
+	withUpdateTime := withMetadataUpdateTime
 	valid := validResourceMetadata
 
 	// Focus this test on fields other than atespace and name.
@@ -54,16 +82,18 @@ func TestValidateResourceMetadataCreate(t *testing.T) {
 		name: "valid",
 		obj:  valid(),
 	}, {
-		name: "valid atespace: empty",
-		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.Atespace = "" }),
+		name: "valid with all optional fields",
+		obj: valid(
+			withMetadataAtespace("as"),
+			withMetadataUID(),
+			withMetadataVersion(),
+			withCreateTime(),
+			withUpdateTime(),
+		),
 	}, {
 		name: "missing name",
 		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.Name = "" }),
 		want: field.ErrorList{field.Required(field.NewPath("name"), "")},
-	}, {
-		name: "unspecified uid",
-		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.Uid = "" }),
-		want: nil,
 	}, {
 		name: "invalid uid: close but not valid",
 		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.Uid = "aaaaaaaa-bbbbcccc-dddd-eeeeeeeeeeee" }),
@@ -73,24 +103,12 @@ func TestValidateResourceMetadataCreate(t *testing.T) {
 		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.Uid = "not a uid" }),
 		want: field.ErrorList{field.Invalid(field.NewPath("uid"), nil, "").WithOrigin("format=k8s-uuid")},
 	}, {
-		name: "unspecified version",
-		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.Version = 0 }),
-		want: nil,
-	}, {
 		name: "valid version: large",
 		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.Version = math.MaxInt64 }),
 	}, {
 		name: "invalid version: negative",
 		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.Version = -1 }),
 		want: field.ErrorList{field.Invalid(field.NewPath("version"), nil, "").WithOrigin("minimum")},
-	}, {
-		name: "unspecified createTime",
-		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.CreateTime = nil }),
-		want: nil,
-	}, {
-		name: "unspecified updateTime",
-		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.UpdateTime = nil }),
-		want: nil,
 	}, {
 		name: "invalid createTime: seconds out of range",
 		obj: valid(func(rm *ateapi.ResourceMetadata) {
@@ -105,15 +123,21 @@ func TestValidateResourceMetadataCreate(t *testing.T) {
 		want: field.ErrorList{field.Invalid(field.NewPath("update_time"), nil, "")},
 	}, {
 		name: "invalid updateTime: precedes createTime",
-		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.UpdateTime = &timestamppb.Timestamp{Seconds: 866} }),
+		obj: valid(
+			withCreateTime(),
+			func(rm *ateapi.ResourceMetadata) { rm.UpdateTime = &timestamppb.Timestamp{Seconds: 866} },
+		),
 		want: field.ErrorList{field.Invalid(field.NewPath("update_time"), nil, "")},
 	}, {
 		name: "valid updateTime: equals createTime",
-		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.UpdateTime = &timestamppb.Timestamp{Seconds: 867} }),
+		obj: valid(
+			withCreateTime(),
+			func(rm *ateapi.ResourceMetadata) { rm.UpdateTime = &timestamppb.Timestamp{Seconds: 867} },
+		),
 		want: nil,
 	}, {
 		name: "valid updateTime: set without createTime",
-		obj:  valid(func(rm *ateapi.ResourceMetadata) { rm.CreateTime = nil }),
+		obj:  valid(withUpdateTime()),
 		want: nil,
 	}}
 	for _, tt := range tests {
@@ -126,6 +150,11 @@ func TestValidateResourceMetadataCreate(t *testing.T) {
 }
 
 func TestValidateResourceMetadataUpdate(t *testing.T) {
+	withUID := withMetadataUID
+	withVersion := withMetadataVersion
+	withCreateTime := withMetadataCreateTime
+	withUpdateTime := withMetadataUpdateTime
+	withAtespace := withMetadataAtespace
 	valid := validResourceMetadata
 
 	// Focus this test on fields other than atespace and name.
@@ -138,6 +167,22 @@ func TestValidateResourceMetadataUpdate(t *testing.T) {
 		name:   "valid",
 		oldObj: valid(),
 		newObj: valid(),
+	}, {
+		name: "valid with all optional fields",
+		oldObj: valid(
+			withAtespace("as"),
+			withUID(),
+			withVersion(),
+			withCreateTime(),
+			withUpdateTime(),
+		),
+		newObj: valid(
+			withAtespace("as"),
+			withUID(),
+			withVersion(),
+			withCreateTime(),
+			withUpdateTime(),
+		),
 	}, {
 		name:   "atespace: empty -> non-empty",
 		oldObj: valid(func(rm *ateapi.ResourceMetadata) { rm.Atespace = "" }),
@@ -168,7 +213,7 @@ func TestValidateResourceMetadataUpdate(t *testing.T) {
 		want:   field.ErrorList{field.Invalid(field.NewPath("name"), nil, "").WithOrigin("immutable")},
 	}, {
 		name:   "uid: unset",
-		oldObj: valid(),
+		oldObj: valid(withUID()),
 		newObj: valid(func(rm *ateapi.ResourceMetadata) { rm.Uid = "" }),
 		want:   field.ErrorList{field.Invalid(field.NewPath("uid"), nil, "").WithOrigin("immutable")},
 	}, {
@@ -183,7 +228,7 @@ func TestValidateResourceMetadataUpdate(t *testing.T) {
 		want:   field.ErrorList{field.Invalid(field.NewPath("uid"), nil, "").WithOrigin("immutable")},
 	}, {
 		name:   "version: unset",
-		oldObj: valid(),
+		oldObj: valid(withVersion()),
 		newObj: valid(func(rm *ateapi.ResourceMetadata) { rm.Version = 0 }),
 		want:   field.ErrorList{field.Invalid(field.NewPath("version"), nil, "").WithOrigin("update")},
 	}, {
@@ -208,29 +253,33 @@ func TestValidateResourceMetadataUpdate(t *testing.T) {
 		},
 	}, {
 		name:   "create_time: unset",
-		oldObj: valid(),
+		oldObj: valid(withCreateTime()),
 		newObj: valid(func(rm *ateapi.ResourceMetadata) { rm.CreateTime = nil }),
 		want:   field.ErrorList{field.Invalid(field.NewPath("create_time"), nil, "").WithOrigin("immutable")},
 	}, {
 		name:   "create_time: changed",
-		oldObj: valid(func(rm *ateapi.ResourceMetadata) { rm.CreateTime.Seconds = 123 }),
-		newObj: valid(func(rm *ateapi.ResourceMetadata) { rm.CreateTime.Seconds = 456 }),
+		oldObj: valid(withCreateTime(), func(rm *ateapi.ResourceMetadata) { rm.CreateTime.Seconds = 123 }),
+		newObj: valid(withCreateTime(), func(rm *ateapi.ResourceMetadata) { rm.CreateTime.Seconds = 456 }),
 		want:   field.ErrorList{field.Invalid(field.NewPath("create_time"), nil, "").WithOrigin("immutable")},
 	}, {
 		name:   "update_time: unset",
-		oldObj: valid(),
+		oldObj: valid(withUpdateTime()),
 		newObj: valid(func(rm *ateapi.ResourceMetadata) { rm.UpdateTime = nil }),
 		want:   field.ErrorList{field.Invalid(field.NewPath("update_time"), nil, "").WithOrigin("update")},
 	}, {
 		name:   "update_time: changed to valid",
-		oldObj: valid(func(rm *ateapi.ResourceMetadata) { rm.UpdateTime.Seconds = 1000 }),
-		newObj: valid(func(rm *ateapi.ResourceMetadata) { rm.UpdateTime.Seconds = 6000 }),
+		oldObj: valid(withUpdateTime(), func(rm *ateapi.ResourceMetadata) { rm.UpdateTime.Seconds = 1000 }),
+		newObj: valid(withUpdateTime(), func(rm *ateapi.ResourceMetadata) { rm.UpdateTime.Seconds = 6000 }),
 		want:   nil,
 	}, {
 		name:   "update_time: changed to precede create_time",
-		oldObj: valid(),
-		newObj: valid(func(rm *ateapi.ResourceMetadata) { rm.UpdateTime.Seconds = 866 }),
-		want:   field.ErrorList{field.Invalid(field.NewPath("update_time"), nil, "")},
+		oldObj: valid(withCreateTime(), withUpdateTime()),
+		newObj: valid(
+			withCreateTime(),
+			withUpdateTime(),
+			func(rm *ateapi.ResourceMetadata) { rm.UpdateTime.Seconds = 866 },
+		),
+		want: field.ErrorList{field.Invalid(field.NewPath("update_time"), nil, "")},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -443,8 +492,7 @@ func TestValidateResourceMetadataNameAndAtespaceFormat(t *testing.T) {
 func TestValidateObjectRef(t *testing.T) {
 	valid := func(mutate func(*ateapi.ObjectRef)) *ateapi.ObjectRef {
 		r := &ateapi.ObjectRef{
-			Atespace: "as",
-			Name:     "nm",
+			Name: "nm",
 		}
 		if mutate != nil {
 			mutate(r)
@@ -459,10 +507,6 @@ func TestValidateObjectRef(t *testing.T) {
 	}{{
 		"valid",
 		valid(nil),
-		nil,
-	}, {
-		"valid atespace: empty",
-		valid(func(r *ateapi.ObjectRef) { r.Atespace = "" }),
 		nil,
 	}, {
 		"valid atespace: alphabetic",
@@ -717,19 +761,31 @@ func validSnapshotStorage(mutate ...func(*ateapi.SnapshotStorage)) *ateapi.Snaps
 	return ss
 }
 
+// validSnapshot returns a Snapshot with only its required fields set. The
+// withSnapshot* modifiers set the optional fields.
 func validSnapshot(mutate ...func(*ateapi.Snapshot)) *ateapi.Snapshot {
 	s := &ateapi.Snapshot{
-		Uuid:            "snap-1",
-		Generation:      1,
-		Owner:           ateapi.SnapshotOwner_SNAPSHOT_OWNER_ACTOR,
-		Fidelity:        ateapi.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY,
-		Locality:        "node-1",
-		DurableSnapshot: validSnapshotStorage(),
+		Uuid:       "snap-1",
+		Generation: 1,
+		Owner:      ateapi.SnapshotOwner_SNAPSHOT_OWNER_ACTOR,
+		Fidelity:   ateapi.SnapshotFidelity_SNAPSHOT_FIDELITY_MEMORY,
 	}
 	for _, m := range mutate {
 		m(s)
 	}
 	return s
+}
+
+// withSnapshotLocality returns a modifier func (see validSnapshot) which sets
+// the locality to a valid value.
+func withSnapshotLocality() func(*ateapi.Snapshot) {
+	return func(s *ateapi.Snapshot) { s.Locality = "node-1" }
+}
+
+// withSnapshotDurableSnapshot returns a modifier func (see validSnapshot)
+// which sets the durable_snapshot to a valid value.
+func withSnapshotDurableSnapshot(mods ...func(*ateapi.SnapshotStorage)) func(*ateapi.Snapshot) {
+	return func(s *ateapi.Snapshot) { s.DurableSnapshot = validSnapshotStorage(mods...) }
 }
 
 // badSnapshot violates Snapshot's rules at once, so a caller can assert that a
@@ -746,6 +802,7 @@ func badSnapshot(mutate ...func(*ateapi.Snapshot)) *ateapi.Snapshot {
 }
 
 func TestValidateSnapshot(t *testing.T) {
+	withDurableSnapshot := withSnapshotDurableSnapshot
 	valid := validSnapshot
 	uuidPath := field.NewPath("uuid")
 	genPath := field.NewPath("generation")
@@ -767,10 +824,14 @@ func TestValidateSnapshot(t *testing.T) {
 			obj:  valid(),
 		},
 		{
-			name: "valid optional fields unset",
-			obj: valid(func(s *ateapi.Snapshot) {
-				s.Locality = ""
-			}),
+			name: "valid with all optional fields",
+			obj: valid(
+				withSnapshotLocality(),
+				withDurableSnapshot(),
+				func(s *ateapi.Snapshot) {
+					s.ActorTemplateUid = someActorUID
+				},
+			),
 		},
 		{
 			name: "missing uuid",
@@ -821,47 +882,53 @@ func TestValidateSnapshot(t *testing.T) {
 			want: field.ErrorList{field.Required(fidelityPath, "")},
 		},
 		{
-			name: "valid without durable_snapshot",
-			obj:  valid(func(s *ateapi.Snapshot) { s.DurableSnapshot = nil }),
-		},
-		{
 			name: "missing durable_snapshot.state",
-			obj: valid(func(s *ateapi.Snapshot) {
-				s.DurableSnapshot.State = ateapi.SnapshotStorageState_SNAPSHOT_STORAGE_STATE_UNSPECIFIED
-			}),
+			obj: valid(
+				withDurableSnapshot(func(ss *ateapi.SnapshotStorage) {
+					ss.State = ateapi.SnapshotStorageState_SNAPSHOT_STORAGE_STATE_UNSPECIFIED
+				}),
+			),
 			want: field.ErrorList{field.Required(statePath, "")},
 		},
 		{
 			name: "negative durable_snapshot.state",
-			obj: valid(func(s *ateapi.Snapshot) {
-				s.DurableSnapshot.State = ateapi.SnapshotStorageState(-1)
-			}),
+			obj: valid(
+				withDurableSnapshot(func(ss *ateapi.SnapshotStorage) {
+					ss.State = ateapi.SnapshotStorageState(-1)
+				}),
+			),
 			want: field.ErrorList{field.Invalid(statePath, nil, "").WithOrigin("minimum")},
 		},
 		{
 			name: "durable_snapshot.state above the enum",
-			obj: valid(func(s *ateapi.Snapshot) {
-				s.DurableSnapshot.State = ateapi.SnapshotStorageState(3)
-			}),
+			obj: valid(
+				withDurableSnapshot(func(ss *ateapi.SnapshotStorage) {
+					ss.State = ateapi.SnapshotStorageState(3)
+				}),
+			),
 			want: field.ErrorList{field.Invalid(statePath, nil, "").WithOrigin("maximum")},
 		},
 		{
 			name: "missing durable_snapshot.object",
-			obj: valid(func(s *ateapi.Snapshot) {
-				s.DurableSnapshot.Object = nil
-			}),
+			obj: valid(
+				withDurableSnapshot(func(ss *ateapi.SnapshotStorage) {
+					ss.Object = nil
+				}),
+			),
 			want: field.ErrorList{field.Required(objectPath, "")},
 		},
 		{
 			name: "missing snapshot_uri",
-			obj:  valid(func(s *ateapi.Snapshot) { s.DurableSnapshot.Object.SnapshotUri = "" }),
+			obj:  valid(withDurableSnapshot(func(ss *ateapi.SnapshotStorage) { ss.Object.SnapshotUri = "" })),
 			want: field.ErrorList{field.Required(uriPath, "")},
 		},
 		{
 			name: "snapshot_uri too long",
-			obj: valid(func(s *ateapi.Snapshot) {
-				s.DurableSnapshot.Object.SnapshotUri = "gs://" + strings.Repeat("x", 2044)
-			}),
+			obj: valid(
+				withDurableSnapshot(func(ss *ateapi.SnapshotStorage) {
+					ss.Object.SnapshotUri = "gs://" + strings.Repeat("x", 2044)
+				}),
+			),
 			want: field.ErrorList{field.TooLong(uriPath, nil, 2048).WithOrigin("maxLength")},
 		},
 		{
@@ -892,6 +959,7 @@ func TestValidateSnapshot(t *testing.T) {
 }
 
 func TestValidateSnapshotUpdate(t *testing.T) {
+	withDurableSnapshot := withSnapshotDurableSnapshot
 	valid := validSnapshot
 	fidelityPath := field.NewPath("fidelity")
 	uriPath := field.NewPath("durable_snapshot", "object", "snapshot_uri")
@@ -938,8 +1006,8 @@ func TestValidateSnapshotUpdate(t *testing.T) {
 		},
 		{
 			name:   "snapshot_uri cleared",
-			oldObj: valid(),
-			newObj: valid(func(s *ateapi.Snapshot) { s.DurableSnapshot.Object.SnapshotUri = "" }),
+			oldObj: valid(withDurableSnapshot()),
+			newObj: valid(withDurableSnapshot(func(ss *ateapi.SnapshotStorage) { ss.Object.SnapshotUri = "" })),
 			want:   field.ErrorList{field.Required(uriPath, "")},
 		},
 		{
@@ -953,10 +1021,12 @@ func TestValidateSnapshotUpdate(t *testing.T) {
 		},
 		{
 			name:   "snapshot_uri changed to a value that is too long",
-			oldObj: valid(),
-			newObj: valid(func(s *ateapi.Snapshot) {
-				s.DurableSnapshot.Object.SnapshotUri = "gs://" + strings.Repeat("x", 2044)
-			}),
+			oldObj: valid(withDurableSnapshot()),
+			newObj: valid(
+				withDurableSnapshot(func(ss *ateapi.SnapshotStorage) {
+					ss.Object.SnapshotUri = "gs://" + strings.Repeat("x", 2044)
+				}),
+			),
 			want: field.ErrorList{field.TooLong(uriPath, nil, 2048).WithOrigin("maxLength")},
 		},
 		{
@@ -969,7 +1039,7 @@ func TestValidateSnapshotUpdate(t *testing.T) {
 		{
 			name:   "every field repaired",
 			oldObj: badSnapshot(),
-			newObj: valid(),
+			newObj: valid(withDurableSnapshot()),
 		},
 	}
 	for _, tt := range tests {
@@ -998,9 +1068,11 @@ func TestValidateNestedSnapshot(t *testing.T) {
 				// write, as an update against the stored one.
 				op := MakeUpdateOp(context.Background())
 				oldVal := validActor(withActorStatus())
-				newVal := validActor(withActorStatus(func(s *ateapi.ActorStatus) {
-					s.Snapshots = []*ateapi.Snapshot{badSnapshot()}
-				}))
+				newVal := validActor(
+					withActorStatus(func(s *ateapi.ActorStatus) {
+						s.Snapshots = []*ateapi.Snapshot{badSnapshot()}
+					}),
+				)
 				return Validate_Actor(ctx, op, nil, newVal, oldVal)
 			},
 		},
@@ -1009,9 +1081,11 @@ func TestValidateNestedSnapshot(t *testing.T) {
 			path: field.NewPath("status", "snapshot"),
 			validate: func(ctx context.Context) field.ErrorList {
 				op := MakeCreateOp(context.Background())
-				obj := validTag(func(tag *ateapi.Tag) {
-					tag.Status.Snapshot = badSnapshot()
-				})
+				obj := validTag(
+					withTagStatus(func(status *ateapi.TagStatus) {
+						status.Snapshot = badSnapshot()
+					}),
+				)
 				return Validate_Tag(ctx, op, nil, obj, nil)
 			},
 		},
